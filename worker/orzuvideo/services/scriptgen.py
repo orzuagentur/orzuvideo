@@ -6,6 +6,7 @@ from typing import Any
 from openai import OpenAI
 
 from orzuvideo.config import settings
+from orzuvideo.services.usage import estimate_openai_cost, log_usage
 
 
 SYSTEM_PROMPT = """You are an elite YouTube Shorts scriptwriter and creative director.
@@ -13,9 +14,11 @@ Write ultra-viral vertical Shorts scripts for motivational / niche content.
 Rules:
 - Spoken duration target: {duration} seconds (about {word_count} words).
 - Language: {language}
+- Format: {video_format} / style: {video_style}
 - Strong hook in first 2 seconds.
 - Short punchy sentences. No fluff.
 - End with a soft CTA if provided.
+- Respect brand rules.
 - Return STRICT JSON only, no markdown.
 JSON schema:
 {{
@@ -30,7 +33,12 @@ JSON schema:
 """
 
 
-def generate_script(training: dict[str, Any]) -> dict[str, Any]:
+def generate_script(
+    training: dict[str, Any],
+    *,
+    user_id: str | None = None,
+    job_id: str | None = None,
+) -> dict[str, Any]:
     client = OpenAI(api_key=settings.openai_api_key)
     duration = int(training.get("duration_seconds") or 45)
     word_count = max(40, int(duration * 2.4))
@@ -42,7 +50,8 @@ Tone: {training.get('tone')}
 Target audience: {training.get('target_audience') or 'general'}
 Hook style: {training.get('hook_style')}
 CTA: {training.get('cta')}
-Brand / style instructions (user trained AI once):
+Brand rules: {training.get('brand_rules') or 'none'}
+Brand / style instructions (user trained AI):
 \"\"\"{training.get('style_prompt')}\"\"\"
 Default Pexels vibe: {training.get('pexels_query')}
 Music mood: {training.get('music_mood')}
@@ -60,11 +69,34 @@ Write one unique Shorts script. Never repeat previous clichés word-for-word.
                     duration=duration,
                     word_count=word_count,
                     language=training.get("language") or "en",
+                    video_format=training.get("video_format") or "shorts",
+                    video_style=training.get("video_style") or "cinematic_mixer",
                 ),
             },
             {"role": "user", "content": user_prompt.strip()},
         ],
     )
+
+    if user_id and response.usage:
+        cost = estimate_openai_cost(
+            response.usage.prompt_tokens or 0,
+            response.usage.completion_tokens or 0,
+        )
+        log_usage(
+            user_id=user_id,
+            job_id=job_id,
+            provider="openai",
+            kind="script_generation",
+            units=(response.usage.prompt_tokens or 0)
+            + (response.usage.completion_tokens or 0),
+            unit_label="tokens",
+            cost_usd=cost,
+            meta={
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "model": settings.openai_model,
+            },
+        )
 
     raw = response.choices[0].message.content or "{}"
     data = json.loads(raw)

@@ -5,6 +5,12 @@ export type Profile = {
   youtube_connected: boolean;
   youtube_channel_id: string | null;
   youtube_channel_title: string | null;
+  youtube_thumbnail_url?: string | null;
+  youtube_custom_url?: string | null;
+  youtube_subscriber_count?: number | null;
+  youtube_view_count?: number | null;
+  youtube_video_count?: number | null;
+  youtube_stats_synced_at?: string | null;
   daily_videos_enabled: boolean;
   videos_per_day: number;
 };
@@ -25,6 +31,13 @@ export type AiTraining = {
   voice_id: string;
   subtitle_style: string;
   duration_seconds: number;
+  video_format: string;
+  video_style: string;
+  reply_comments_enabled: boolean;
+  reply_languages: string;
+  reply_style_prompt: string;
+  learning_enabled: boolean;
+  brand_rules: string;
   is_trained: boolean;
 };
 
@@ -33,9 +46,50 @@ export type VideoJob = {
   status: string;
   title: string | null;
   script_text: string | null;
+  description?: string | null;
   youtube_url: string | null;
+  youtube_video_id?: string | null;
   error_message: string | null;
   scheduled_for: string;
   created_at: string;
   completed_at: string | null;
+  thumbnail_url?: string | null;
+  preview_url?: string | null;
+  view_count?: number | null;
+  like_count?: number | null;
+  comment_count?: number | null;
+  duration_seconds?: number | null;
+};
+
+export type PublishSchedule = {
+  id?: string;
+  user_id?: string;
+  enabled: boolean;
+  mode: "daily" | "weekdays" | "custom_days" | "dates";
+  videos_per_day: number;
+  times: string[];
+  weekdays: number[];
+  custom_dates: string[];
+  timezone: string;
+};
+
+export type UsageEvent = {
+  id: string;
+  provider: string;
+  kind: string;
+  units: number;
+  unit_label: string;
+  cost_usd: number;
+  meta: Record<string, unknown>;
+  created_at: string;
+  job_id?: string | null;
+};
+
+export type DashboardStats = {
+  published: number;
+  queued: number;
+  processing: number;
+  failed: number;
+  total: number;
+  costUsdMonth: number;
 };

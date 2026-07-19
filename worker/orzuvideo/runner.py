@@ -10,7 +10,8 @@ from orzuvideo.config import TEMP_DIR, settings
 from orzuvideo.pipeline.editor import build_short
 from orzuvideo.pipeline.media import synthesize_with_timestamps
 from orzuvideo.services import db
-from orzuvideo.services.pexels import download_music, download_stock_clips
+from orzuvideo.services.jamendo import attribution_line, download_background_music
+from orzuvideo.services.pexels import download_stock_clips
 from orzuvideo.services.scriptgen import generate_script
 from orzuvideo.services.youtube import upload_short
 
@@ -33,7 +34,7 @@ def process_job(job: dict) -> None:
 
         # 1) Script
         db.update_job(sb, job_id, status="generating_script")
-        script_data = generate_script(training)
+        script_data = generate_script(training, user_id=user_id, job_id=job_id)
         db.update_job(
             sb,
             job_id,
@@ -52,12 +53,47 @@ def process_job(job: dict) -> None:
             voice_path,
             voice_id=training.get("voice_id") or settings.elevenlabs_voice_id,
         )
+        from orzuvideo.services.usage import estimate_elevenlabs_cost, log_usage
+
+        chars = len(script_data["script"])
+        log_usage(
+            user_id=user_id,
+            job_id=job_id,
+            provider="elevenlabs",
+            kind="tts",
+            units=chars,
+            unit_label="chars",
+            cost_usd=estimate_elevenlabs_cost(chars),
+        )
 
         # 3) Media
         db.update_job(sb, job_id, status="fetching_media")
         queries = script_data["pexels_queries"] or [training.get("pexels_query")]
         clips = download_stock_clips(queries, work / "clips", count=3)
-        music = download_music(training.get("music_mood") or "cinematic", work / "music.mp3")
+        jamendo = download_background_music(
+            training.get("music_mood") or "cinematic motivational",
+            work / "music.mp3",
+        )
+        music_path = jamendo.path if jamendo else None
+        credit = attribution_line(jamendo)
+        description = script_data["description"]
+        if credit:
+            description = f"{description}\n\n{credit}"
+            db.update_job(
+                sb,
+                job_id,
+                description=description,
+                metadata={
+                    "hook": script_data["hook"],
+                    "pexels_queries": script_data["pexels_queries"],
+                    "jamendo": {
+                        "id": jamendo.id if jamendo else None,
+                        "name": jamendo.name if jamendo else None,
+                        "artist": jamendo.artist if jamendo else None,
+                        "url": jamendo.shareurl if jamendo else None,
+                    },
+                },
+            )
 
         # 4) Edit
         db.update_job(sb, job_id, status="editing")
@@ -65,7 +101,7 @@ def process_job(job: dict) -> None:
         build_short(
             clips=clips,
             voice_path=voice_path,
-            music_path=music,
+            music_path=music_path,
             words=words,
             work_dir=work / "edit",
             output_path=out_video,
@@ -79,7 +115,7 @@ def process_job(job: dict) -> None:
             profile,
             out_video,
             title=script_data["title"],
-            description=script_data["description"],
+            description=description,
             tags=script_data["tags"],
         )
 
@@ -104,6 +140,18 @@ def process_job(job: dict) -> None:
             youtube_url=yt["youtube_url"],
             title=script_data["title"],
             script_text=script_data["script"],
+        )
+        from orzuvideo.services.usage import log_usage
+
+        log_usage(
+            user_id=user_id,
+            job_id=job_id,
+            provider="youtube",
+            kind="upload",
+            units=1,
+            unit_label="actions",
+            cost_usd=0,
+            meta={"youtube_video_id": yt["youtube_video_id"]},
         )
     except Exception as exc:
         db.update_job(

@@ -30,6 +30,7 @@ export async function GET() {
       "https://www.googleapis.com/auth/youtube.upload",
       "https://www.googleapis.com/auth/youtube.readonly",
       "https://www.googleapis.com/auth/youtube.force-ssl",
+      "https://www.googleapis.com/auth/youtube",
     ].join(" "),
     access_type: "offline",
     // select_account lets user pick Google account / Brand Account channel

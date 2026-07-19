@@ -23,7 +23,9 @@ supabase/     SQL схема
 ## 1. Supabase
 
 1. Создай проект на [supabase.com](https://supabase.com)
-2. SQL Editor → выполни `supabase/migrations/001_initial.sql`
+2. SQL Editor → выполни по очереди:
+   - `supabase/migrations/001_initial.sql`
+   - `supabase/migrations/002_pro_dashboard.sql`
 3. Authentication → Providers → Email: включи
 4. Скопируй URL, anon key, service_role key
 
@@ -34,6 +36,7 @@ supabase/     SQL схема
 | OpenAI (`gpt-4o-mini`) | Сценарий Shorts |
 | ElevenLabs | Голос + тайминги субтитров |
 | Pexels | Фоновые видео (портрет) |
+| Jamendo | Фоновая instrumental-музыка (client_id) |
 | Google Cloud YouTube Data API v3 | OAuth + upload |
 
 ### Google / YouTube

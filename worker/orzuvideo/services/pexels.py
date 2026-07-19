@@ -84,20 +84,3 @@ def download_stock_clips(
     if not clips:
         raise RuntimeError(f"No Pexels clips found for queries: {queries}")
     return clips
-
-
-def download_music(mood: str, dest: Path) -> Path | None:
-    """
-    Optional: use Pexels-free approach via local royalty-free bed,
-    or skip if no music asset. Returns path if available.
-    """
-    local = Path(__file__).resolve().parents[2] / "assets" / "music"
-    if local.exists():
-        files = list(local.glob("*.mp3")) + list(local.glob("*.wav"))
-        if files:
-            pick = random.choice(files)
-            dest.write_bytes(pick.read_bytes())
-            return dest
-    # Mood unused when no local library — montage still works with voice only
-    _ = mood
-    return None
