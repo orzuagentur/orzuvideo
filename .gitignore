@@ -17,3 +17,5 @@ worker/**/temp/
 .DS_Store
 .vercel
 *.log
+
+.vercel

@@ -38,34 +38,18 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${appUrl}/dashboard?youtube=token_error`);
   }
 
-  let channelTitle: string | null = null;
-  let channelId: string | null = null;
-
-  try {
-    const chRes = await fetch(
-      "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
-      { headers: { Authorization: `Bearer ${tokens.access_token}` } },
-    );
-    const ch = await chRes.json();
-    const item = ch.items?.[0];
-    channelId = item?.id ?? null;
-    channelTitle = item?.snippet?.title ?? null;
-  } catch {
-    // non-fatal
-  }
-
   const expiresAt = tokens.expires_in
     ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
     : null;
 
   const update: Record<string, unknown> = {
-    youtube_connected: true,
+    // Connected only after user picks a channel
+    youtube_connected: false,
     youtube_access_token: tokens.access_token,
     youtube_token_expires_at: expiresAt,
-    youtube_channel_id: channelId,
-    youtube_channel_title: channelTitle,
+    youtube_channel_id: null,
+    youtube_channel_title: null,
   };
-  // Google only returns refresh_token on first consent
   if (tokens.refresh_token) {
     update.youtube_refresh_token = tokens.refresh_token;
   }
@@ -80,5 +64,5 @@ export async function GET(request: Request) {
     return NextResponse.redirect(`${appUrl}/dashboard?youtube=save_error`);
   }
 
-  return NextResponse.redirect(`${appUrl}/dashboard?youtube=connected`);
+  return NextResponse.redirect(`${appUrl}/dashboard/channels`);
 }

@@ -29,9 +29,11 @@ export async function GET() {
     scope: [
       "https://www.googleapis.com/auth/youtube.upload",
       "https://www.googleapis.com/auth/youtube.readonly",
+      "https://www.googleapis.com/auth/youtube.force-ssl",
     ].join(" "),
     access_type: "offline",
-    prompt: "consent",
+    // select_account lets user pick Google account / Brand Account channel
+    prompt: "select_account consent",
     include_granted_scopes: "true",
     state: user.id,
   });

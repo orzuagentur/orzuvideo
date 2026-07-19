@@ -3,6 +3,7 @@ export type Profile = {
   email: string | null;
   display_name: string | null;
   youtube_connected: boolean;
+  youtube_channel_id: string | null;
   youtube_channel_title: string | null;
   daily_videos_enabled: boolean;
   videos_per_day: number;

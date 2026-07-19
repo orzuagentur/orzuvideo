@@ -4,24 +4,16 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import type { AiTraining, Profile, VideoJob } from "@/lib/types";
-
-const STATUS_LABEL: Record<string, string> = {
-  queued: "Queued",
-  generating_script: "Writing script",
-  generating_voice: "Generating voice",
-  fetching_media: "Fetching footage",
-  editing: "Editing",
-  uploading: "Uploading",
-  published: "Published",
-  failed: "Failed",
-};
+import { JOB_STATUS_LABEL, statusColor } from "@/lib/job-status";
 
 export function DashboardClient({
   profile,
+  hasYoutubeToken,
   training,
   jobs,
 }: {
   profile: Profile | null;
+  hasYoutubeToken: boolean;
   training: AiTraining | null;
   jobs: VideoJob[];
 }) {
@@ -59,7 +51,7 @@ export function DashboardClient({
       setMessage(data.error || "Could not queue job");
       return;
     }
-    setMessage("Job queued. Worker will render & publish shortly.");
+    setMessage("Job queued. Open Content to track it.");
     router.refresh();
   }
 
@@ -75,12 +67,26 @@ export function DashboardClient({
           detail={
             profile?.youtube_connected
               ? profile.youtube_channel_title || "Connected"
-              : "Not connected"
+              : hasYoutubeToken
+                ? "Pick a channel"
+                : "Not connected"
           }
           action={
-            <a href="/api/youtube/connect" className="btn btn-primary text-sm">
-              {profile?.youtube_connected ? "Reconnect" : "Connect YouTube"}
-            </a>
+            <div className="flex flex-wrap gap-2">
+              {hasYoutubeToken ? (
+                <Link
+                  href="/dashboard/channels"
+                  className="btn btn-primary text-sm"
+                >
+                  {profile?.youtube_connected
+                    ? "Change channel"
+                    : "Choose channel"}
+                </Link>
+              ) : null}
+              <a href="/api/youtube/connect" className="btn btn-ghost text-sm">
+                {hasYoutubeToken ? "Reconnect" : "Connect YouTube"}
+              </a>
+            </div>
           }
         />
         <StatusBlock
@@ -122,18 +128,27 @@ export function DashboardClient({
       <section className="panel rise-delay p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Jobs</h2>
+            <h2 className="text-lg font-semibold">Recent content</h2>
             <p className="mt-1 text-sm text-[color:var(--muted)]">
-              Queue a Short now, or let cron create two every day.
+              Latest jobs. Full queue and history are in{" "}
+              <Link href="/dashboard/content" className="text-[color:var(--accent)]">
+                Content
+              </Link>
+              .
             </p>
           </div>
-          <button
-            className="btn btn-primary text-sm"
-            disabled={!ready || busy === "generate"}
-            onClick={generateNow}
-          >
-            {busy === "generate" ? "Queuing…" : "Generate 1 Short now"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/dashboard/content" className="btn btn-ghost text-sm">
+              Open Content
+            </Link>
+            <button
+              className="btn btn-primary text-sm"
+              disabled={!ready || busy === "generate"}
+              onClick={generateNow}
+            >
+              {busy === "generate" ? "Queuing…" : "Generate 1 Short now"}
+            </button>
+          </div>
         </div>
 
         {message && (
@@ -143,7 +158,7 @@ export function DashboardClient({
         <ul className="mt-6 divide-y divide-[color:var(--line)]">
           {jobs.length === 0 && (
             <li className="py-6 text-sm text-[color:var(--muted)]">
-              No jobs yet.
+              No content yet.
             </li>
           )}
           {jobs.map((job) => (
@@ -152,18 +167,21 @@ export function DashboardClient({
               className="flex flex-wrap items-start justify-between gap-3 py-4"
             >
               <div className="min-w-0 flex-1">
-                <p className="font-medium">
-                  {job.title || "Untitled Short"}
-                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className="inline-flex rounded-full px-2 py-0.5 text-xs"
+                    style={{
+                      background: `${statusColor(job.status)}22`,
+                      color: statusColor(job.status),
+                    }}
+                  >
+                    {JOB_STATUS_LABEL[job.status] || job.status}
+                  </span>
+                  <p className="font-medium">{job.title || "Untitled Short"}</p>
+                </div>
                 <p className="mt-1 text-xs text-[color:var(--muted)]">
-                  {STATUS_LABEL[job.status] || job.status} ·{" "}
                   {new Date(job.created_at).toLocaleString()}
                 </p>
-                {job.error_message && (
-                  <p className="mt-2 line-clamp-2 text-xs text-[color:var(--danger)]">
-                    {job.error_message}
-                  </p>
-                )}
               </div>
               {job.youtube_url && (
                 <a

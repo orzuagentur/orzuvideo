@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { AppNav } from "@/components/AppNav";
 import { DashboardClient } from "@/components/DashboardClient";
 import type { AiTraining, Profile, VideoJob } from "@/lib/types";
 
@@ -23,35 +23,32 @@ export default async function DashboardPage() {
         )
         .eq("user_id", user.id)
         .order("created_at", { ascending: false })
-        .limit(12),
+        .limit(8),
     ]);
+
+  const hasYoutubeToken = Boolean(
+    profile?.youtube_access_token || profile?.youtube_refresh_token,
+  );
+
+  const safeProfile: Profile | null = profile
+    ? {
+        id: profile.id,
+        email: profile.email,
+        display_name: profile.display_name,
+        youtube_connected: profile.youtube_connected,
+        youtube_channel_id: profile.youtube_channel_id,
+        youtube_channel_title: profile.youtube_channel_title,
+        daily_videos_enabled: profile.daily_videos_enabled,
+        videos_per_day: profile.videos_per_day,
+      }
+    : null;
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-5xl px-6 py-8">
-      <header className="mb-10 flex flex-wrap items-center justify-between gap-4 rise">
-        <div>
-          <p
-            className="font-[family-name:var(--font-syne)] text-2xl"
-            style={{ fontWeight: 800 }}
-          >
-            OrzuVideo
-          </p>
-          <p className="mt-1 text-sm text-[color:var(--muted)]">{user.email}</p>
-        </div>
-        <nav className="flex items-center gap-3">
-          <Link href="/training" className="btn btn-ghost text-sm">
-            AI training
-          </Link>
-          <form action="/auth/signout" method="post">
-            <button type="submit" className="btn btn-ghost text-sm">
-              Sign out
-            </button>
-          </form>
-        </nav>
-      </header>
-
+      <AppNav email={user.email} />
       <DashboardClient
-        profile={(profile as Profile) ?? null}
+        profile={safeProfile}
+        hasYoutubeToken={hasYoutubeToken}
         training={(training as AiTraining) ?? null}
         jobs={(jobs as VideoJob[]) ?? []}
       />
