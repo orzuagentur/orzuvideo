@@ -7,8 +7,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[1]
-# Always load worker/.env (not only CWD), so Jamendo key is found
-load_dotenv(ROOT / ".env", override=False)
+# Always load worker/.env with override so keys from this file win
+load_dotenv(ROOT / ".env", override=True)
 load_dotenv(override=False)
 
 TEMP_DIR = Path(os.getenv("TEMP_DIR", ROOT / "temp"))

@@ -51,17 +51,24 @@ def process_instagram_job(job: dict[str, Any]) -> None:
     user_brief = (meta0.get("user_brief") or "").strip() or None
 
     try:
-        training = db.get_instagram_training(sb, user_id)
-        if not training:
-            raise RuntimeError("Instagram AI training missing. Train in Instagram studio.")
-
-        avatar_id = (training.get("heygen_avatar_id") or settings.heygen_avatar_id or "").strip()
+        training = db.get_instagram_training(sb, user_id) or {}
+        # Per-job overrides from Content studio (no IG Connect needed for drafts)
+        avatar_id = (
+            str(meta0.get("heygen_avatar_id") or "").strip()
+            or (training.get("heygen_avatar_id") or settings.heygen_avatar_id or "").strip()
+        )
         if not avatar_id:
-            raise RuntimeError("HeyGen avatar_id missing (Instagram → Avatar).")
+            raise RuntimeError("HeyGen avatar_id missing (Instagram → Avatar → pick a style).")
         if not heygen_configured():
-            raise RuntimeError("HEYGEN_API_KEY missing in worker/.env")
+            raise RuntimeError(
+                "HEYGEN_API_KEY missing in worker/.env — copy from web/.env.local and restart worker."
+            )
 
-        account = db.get_instagram_account(sb, user_id) if publish or meta0.get("publish_existing") else None
+        account = (
+            db.get_instagram_account(sb, user_id)
+            if publish or meta0.get("publish_existing")
+            else None
+        )
 
         # Publish-only path
         if meta0.get("publish_existing") and job.get("preview_url"):
@@ -94,10 +101,31 @@ def process_instagram_job(job: dict[str, Any]) -> None:
             )
             return
 
+        # Merge training + Content overrides for scriptgen
+        training_shaped = _as_youtube_shaped_training(training)
+        if meta0.get("duration_seconds"):
+            training_shaped["duration_seconds"] = int(meta0["duration_seconds"])
+        if meta0.get("language"):
+            training_shaped["language"] = str(meta0["language"])
+        if meta0.get("tone"):
+            training_shaped["tone"] = str(meta0["tone"])
+        if meta0.get("style_prompt"):
+            training_shaped["style_prompt"] = str(meta0["style_prompt"])
+        if meta0.get("hook_style"):
+            training_shaped["hook_style"] = str(meta0["hook_style"])
+        if meta0.get("cta"):
+            training_shaped["cta"] = str(meta0["cta"])
+
+        voice_id = (
+            str(meta0.get("voice_id") or "").strip()
+            or training.get("voice_id")
+            or settings.elevenlabs_voice_id
+        )
+
         # 1) Script
         db.update_ig_job(sb, job_id, status="generating_script")
         script_data = generate_script(
-            _as_youtube_shaped_training(training),
+            training_shaped,
             user_id=user_id,
             job_id=job_id,
             user_brief=user_brief,
@@ -110,7 +138,7 @@ def process_instagram_job(job: dict[str, Any]) -> None:
             title=script_data["title"],
             caption=caption,
             tags=script_data.get("tags") or [],
-            metadata={**meta0, "hook": script_data.get("hook")},
+            metadata={**meta0, "hook": script_data.get("hook"), "heygen_avatar_id": avatar_id},
         )
 
         # 2) Voice
@@ -119,7 +147,7 @@ def process_instagram_job(job: dict[str, Any]) -> None:
         synthesize_with_timestamps(
             script_data["script"],
             voice_path,
-            voice_id=training.get("voice_id") or settings.elevenlabs_voice_id,
+            voice_id=voice_id,
         )
         chars = len(script_data["script"])
         log_usage(
@@ -147,7 +175,7 @@ def process_instagram_job(job: dict[str, Any]) -> None:
         )
         db.update_ig_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
 
-        # 4) Preview storage (required for IG publish URL)
+        # 4) Preview storage (required for download + optional IG publish URL)
         db.update_ig_job(sb, job_id, status="editing")
         preview_url = upload_preview(
             sb, user_id=user_id, job_id=f"ig_{job_id}", video_path=out_video
@@ -155,8 +183,7 @@ def process_instagram_job(job: dict[str, Any]) -> None:
         db.update_ig_job(sb, job_id, preview_url=preview_url)
         print(f"IG preview: {preview_url}")
 
-        # Estimate HeyGen cost ~$0.05/sec for ~duration (logged as other)
-        dur = int(training.get("duration_seconds") or 30)
+        dur = int(training_shaped.get("duration_seconds") or 30)
         log_usage(
             user_id=user_id,
             job_id=job_id,
@@ -176,13 +203,22 @@ def process_instagram_job(job: dict[str, Any]) -> None:
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 metadata={**meta0, "preview_uploaded": True, "publish": False},
             )
-            print(f"IG draft ready: {job_id}")
+            print(f"IG draft ready (download): {job_id}")
             return
 
         if not account:
             account = db.get_instagram_account(sb, user_id)
         if not account:
-            raise RuntimeError("Instagram is not connected.")
+            # Auto-fallback: keep as ready so user can download
+            db.update_ig_job(
+                sb,
+                job_id,
+                status="ready",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                error_message="Generated OK but Instagram not connected — download from Content.",
+                metadata={**meta0, "preview_uploaded": True, "publish": False},
+            )
+            return
 
         db.update_ig_job(sb, job_id, status="uploading")
         result = publish_reel(

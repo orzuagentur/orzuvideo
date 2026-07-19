@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+type JobBody = {
+  brief?: string;
+  publish?: boolean;
+  duration_seconds?: number;
+  language?: string;
+  tone?: string;
+  voice_id?: string;
+  heygen_avatar_id?: string;
+  style_prompt?: string;
+  hook_style?: string;
+  cta?: string;
+};
+
+/** Queue a HeyGen Reel. Instagram Connect is ONLY required when publish=true. */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -8,7 +22,7 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { brief?: string; publish?: boolean } = {};
+  let body: JobBody = {};
   try {
     const text = await request.text();
     if (text) body = JSON.parse(text);
@@ -25,34 +39,72 @@ export async function POST(request: Request) {
       .select("connected")
       .eq("user_id", user.id)
       .maybeSingle(),
-    supabase
-      .from("instagram_training")
-      .select("is_trained, heygen_avatar_id")
-      .eq("user_id", user.id)
-      .maybeSingle(),
+    supabase.from("instagram_training").select("*").eq("user_id", user.id).maybeSingle(),
   ]);
 
-  if (!training?.is_trained) {
-    return NextResponse.json({ error: "Train Instagram AI first" }, { status: 400 });
-  }
-  if (!training.heygen_avatar_id) {
+  const avatarId = String(
+    body.heygen_avatar_id || training?.heygen_avatar_id || process.env.HEYGEN_AVATAR_ID || "",
+  ).trim();
+
+  if (!avatarId) {
     return NextResponse.json(
-      { error: "Save HeyGen Avatar ID in Instagram → Avatar" },
+      {
+        error:
+          "Pick a HeyGen style in Instagram → Avatar first (or set HEYGEN_AVATAR_ID).",
+      },
       { status: 400 },
     );
   }
+
   if (publish && !account?.connected) {
     return NextResponse.json(
-      { error: "Connect Instagram account first" },
+      {
+        error:
+          "Connect Instagram only if you want auto-publish. For download-only, leave Publish off.",
+      },
       { status: 400 },
     );
   }
-  if (!brief) {
+
+  if (!brief || brief.length < 8) {
     return NextResponse.json(
-      { error: "Write a short brief for the Reel" },
+      { error: "Write a brief for the Reel (at least a short idea)" },
       { status: 400 },
     );
   }
+
+  // Soft-ensure training row so worker can run without a separate "Train" click
+  if (!training) {
+    await supabase.from("instagram_training").upsert(
+      {
+        user_id: user.id,
+        heygen_avatar_id: avatarId,
+        niche: "lifestyle",
+        style_prompt:
+          String(body.style_prompt || "").trim() ||
+          "Friendly talking-head creator for Instagram Reels.",
+        is_trained: true,
+        voice_id: String(body.voice_id || "").trim() || "21m00Tcm4TlvDq8ikWAM",
+        duration_seconds: Number(body.duration_seconds) || 30,
+        language: String(body.language || "en"),
+        tone: String(body.tone || "friendly"),
+      },
+      { onConflict: "user_id" },
+    );
+  } else if (!training.is_trained || !training.heygen_avatar_id) {
+    await supabase
+      .from("instagram_training")
+      .update({
+        is_trained: true,
+        heygen_avatar_id: training.heygen_avatar_id || avatarId,
+      })
+      .eq("user_id", user.id);
+  }
+
+  const duration = Math.min(
+    90,
+    Math.max(15, Number(body.duration_seconds) || training?.duration_seconds || 30),
+  );
 
   const { data, error } = await supabase
     .from("instagram_jobs")
@@ -63,7 +115,17 @@ export async function POST(request: Request) {
       metadata: {
         publish,
         user_brief: brief,
-        source: "instagram_content_plus",
+        source: "instagram_content_studio",
+        heygen_avatar_id: avatarId,
+        duration_seconds: duration,
+        language: String(body.language || training?.language || "en").trim(),
+        tone: String(body.tone || training?.tone || "friendly").trim(),
+        voice_id: String(
+          body.voice_id || training?.voice_id || "21m00Tcm4TlvDq8ikWAM",
+        ).trim(),
+        style_prompt: String(body.style_prompt || training?.style_prompt || "").trim(),
+        hook_style: String(body.hook_style || training?.hook_style || "").trim(),
+        cta: String(body.cta || training?.cta || "").trim(),
       },
     })
     .select("id")

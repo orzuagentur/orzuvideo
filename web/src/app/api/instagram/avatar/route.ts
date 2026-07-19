@@ -22,6 +22,7 @@ export async function POST(request: Request) {
     heygen_background_url: String(body.heygen_background_url || "").trim() || null,
     avatar_image_url: String(body.avatar_image_url || "").trim() || null,
     visual_mode: String(body.visual_mode || "heygen"),
+    is_trained: true,
   };
 
   // Upsert training row; keep existing style fields if present

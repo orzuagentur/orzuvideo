@@ -109,7 +109,8 @@ def update_ig_job(sb: Client, job_id: str, **fields: Any) -> None:
 
 
 def get_instagram_training(sb: Client, user_id: str) -> dict[str, Any] | None:
-    result = (
+    """Prefer trained rows; fall back to any row with heygen_avatar_id."""
+    trained = (
         sb.table("instagram_training")
         .select("*")
         .eq("user_id", user_id)
@@ -117,7 +118,16 @@ def get_instagram_training(sb: Client, user_id: str) -> dict[str, Any] | None:
         .limit(1)
         .execute()
     )
-    rows = result.data or []
+    if trained.data:
+        return trained.data[0]
+    any_row = (
+        sb.table("instagram_training")
+        .select("*")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    rows = any_row.data or []
     return rows[0] if rows else None
 
 

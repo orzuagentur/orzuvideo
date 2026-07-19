@@ -53,8 +53,9 @@ export function InstagramAccountStudio({
       <header className="rise">
         <h1 className="text-2xl font-semibold">Account</h1>
         <p className="mt-1 text-sm text-[color:var(--muted)]">
-          Connect an Instagram Business account via Meta (Facebook Page link). YouTube
-          OAuth is separate and unchanged.
+          Optional: connect an Instagram Business account only if you want one-click
+          publish. Generation and download work without Connect — this studio is the
+          HeyGen video generator.
         </p>
       </header>
 
