@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { href: "/dashboard/schedule", label: "Schedule" },
   { href: "/dashboard/channel", label: "Channel" },
   { href: "/dashboard/content", label: "Content" },
+  { href: "/dashboard/worker", label: "Worker" },
   { href: "/dashboard/costs", label: "Costs" },
 ];
 
@@ -29,7 +30,11 @@ export function SidebarShell({
   const pathname = usePathname();
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-7xl gap-0 px-0 md:gap-6 md:px-6 md:py-6">
+    <div
+      className={`mx-auto flex min-h-screen w-full gap-0 px-0 md:gap-6 md:px-6 md:py-6 ${
+        pathname.startsWith("/dashboard/worker") ? "max-w-[1600px]" : "max-w-7xl"
+      }`}
+    >
       <aside className="sticky top-0 z-20 flex h-screen w-full max-w-[280px] flex-col border-r border-[color:var(--line)] bg-[color:var(--bg-elevated)]/90 px-4 py-6 backdrop-blur md:rounded-2xl md:border">
         <div className="px-2">
           <p

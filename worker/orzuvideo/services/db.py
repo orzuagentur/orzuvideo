@@ -48,6 +48,26 @@ def claim_next_job(sb: Client) -> dict[str, Any] | None:
     return updated.data[0]
 
 
+def beat_presence(sb: Client, *, working: bool = False) -> None:
+    """Tell the dashboard the Python worker is alive."""
+    import socket
+
+    try:
+        sb.table("worker_presence").upsert(
+            {
+                "id": "main",
+                "last_seen_at": datetime.now(timezone.utc).isoformat(),
+                "hostname": socket.gethostname(),
+                "meta": {
+                    "poll_interval_sec": settings.poll_interval_sec,
+                    "working": working,
+                },
+            }
+        ).execute()
+    except Exception as exc:
+        print(f"worker_presence beat failed (run migration 004?): {exc}")
+
+
 def update_job(sb: Client, job_id: str, **fields: Any) -> None:
     sb.table("video_jobs").update(fields).eq("id", job_id).execute()
 

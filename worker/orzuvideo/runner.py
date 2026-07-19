@@ -278,9 +278,13 @@ def process_next_job() -> bool:
 
 def run_forever() -> None:
     print("OrzuVideo worker started. Polling for jobs...")
+    sb = db.get_supabase()
     while True:
         try:
+            db.beat_presence(sb, working=False)
             worked = process_next_job()
+            if worked:
+                db.beat_presence(sb, working=True)
             if not worked:
                 time.sleep(settings.poll_interval_sec)
         except KeyboardInterrupt:
