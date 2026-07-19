@@ -269,6 +269,14 @@ def process_job(job: dict) -> None:
 
 def process_next_job() -> bool:
     sb = db.get_supabase()
+    # Prefer Instagram queue when present, then YouTube
+    ig_job = db.claim_next_instagram_job(sb)
+    if ig_job:
+        from orzuvideo.ig_runner import process_instagram_job
+
+        process_instagram_job(ig_job)
+        return True
+
     job = db.claim_next_job(sb)
     if not job:
         return False

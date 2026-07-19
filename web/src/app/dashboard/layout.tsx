@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { SidebarShell } from "@/components/SidebarShell";
+import { AppShell } from "@/components/AppShell";
 
 export default async function DashboardLayout({
   children,
@@ -13,5 +13,5 @@ export default async function DashboardLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  return <SidebarShell email={user.email}>{children}</SidebarShell>;
+  return <AppShell email={user.email}>{children}</AppShell>;
 }
