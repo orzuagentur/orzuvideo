@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Profile, VideoJob } from "@/lib/types";
+import { YouTubeVideoCards } from "@/components/YouTubeVideoCards";
 
 export function ChannelStudio({
   profile,
@@ -68,7 +69,7 @@ export function ChannelStudio({
         <div>
           <h1 className="text-2xl font-semibold">Channel</h1>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            Live channel health and published content.
+            Live channel health and Shorts as YouTube-style cards.
           </p>
         </div>
         <button className="btn btn-ghost text-sm" disabled={busy === "sync"} onClick={sync}>
@@ -106,51 +107,14 @@ export function ChannelStudio({
         </div>
       </section>
 
-      <section className="panel rise-delay overflow-hidden">
-        <div className="border-b border-[color:var(--line)] p-5">
-          <h3 className="font-semibold">Published on this channel</h3>
-        </div>
-        <ul className="divide-y divide-[color:var(--line)]">
-          {videos.length === 0 && (
-            <li className="p-6 text-sm text-[color:var(--muted)]">No published Shorts yet.</li>
-          )}
-          {videos.map((v) => (
-            <li key={v.id} className="flex flex-wrap items-start gap-4 p-5">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">{v.title || "Untitled"}</p>
-                <p className="mt-1 text-xs text-[color:var(--muted)]">
-                  Views {v.view_count ?? 0} · Likes {v.like_count ?? 0} · Comments{" "}
-                  {v.comment_count ?? 0}
-                  {v.completed_at
-                    ? ` · ${new Date(v.completed_at).toLocaleString()}`
-                    : ""}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {v.youtube_url && (
-                  <a
-                    href={v.youtube_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-ghost text-xs"
-                  >
-                    Open
-                  </a>
-                )}
-                {v.youtube_video_id && (
-                  <button
-                    className="btn btn-ghost text-xs"
-                    style={{ color: "var(--danger)" }}
-                    disabled={busy === v.youtube_video_id}
-                    onClick={() => removeVideo(v.youtube_video_id!)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+      <section className="space-y-3">
+        <h3 className="font-semibold">Published Shorts</h3>
+        <YouTubeVideoCards
+          jobs={videos}
+          onDelete={removeVideo}
+          busyId={busy}
+          emptyLabel="No published Shorts yet."
+        />
       </section>
     </div>
   );

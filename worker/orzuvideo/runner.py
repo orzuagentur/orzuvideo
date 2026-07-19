@@ -74,26 +74,35 @@ def process_job(job: dict) -> None:
             training.get("music_mood") or "cinematic motivational",
             work / "music.mp3",
         )
+        if jamendo is None and settings.jamendo_client_id:
+            # Hard retry with safe popular tags
+            jamendo = download_background_music("epic soundtrack", work / "music.mp3")
         music_path = jamendo.path if jamendo else None
+        if music_path is None:
+            print("WARNING: no background music attached to this Short")
         credit = attribution_line(jamendo)
         description = script_data["description"]
+        meta = {
+            "hook": script_data["hook"],
+            "pexels_queries": script_data["pexels_queries"],
+            "jamendo": None,
+            "music_attached": bool(music_path),
+        }
+        if jamendo:
+            meta["jamendo"] = {
+                "id": jamendo.id,
+                "name": jamendo.name,
+                "artist": jamendo.artist,
+                "url": jamendo.shareurl,
+            }
         if credit:
             description = f"{description}\n\n{credit}"
-            db.update_job(
-                sb,
-                job_id,
-                description=description,
-                metadata={
-                    "hook": script_data["hook"],
-                    "pexels_queries": script_data["pexels_queries"],
-                    "jamendo": {
-                        "id": jamendo.id if jamendo else None,
-                        "name": jamendo.name if jamendo else None,
-                        "artist": jamendo.artist if jamendo else None,
-                        "url": jamendo.shareurl if jamendo else None,
-                    },
-                },
-            )
+        db.update_job(
+            sb,
+            job_id,
+            description=description,
+            metadata=meta,
+        )
 
         # 4) Edit
         db.update_job(sb, job_id, status="editing")
@@ -106,6 +115,7 @@ def process_job(job: dict) -> None:
             work_dir=work / "edit",
             output_path=out_video,
             emphasis=script_data.get("subtitle_emphasis"),
+            hook_text=script_data.get("hook"),
         )
         db.update_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
 

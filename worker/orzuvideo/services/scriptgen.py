@@ -15,15 +15,17 @@ Rules:
 - Spoken duration target: {duration} seconds (about {word_count} words).
 - Language: {language}
 - Format: {video_format} / style: {video_style}
-- Strong hook in first 2 seconds.
-- Short punchy sentences. No fluff.
+- CRITICAL HOOK: the first 3 seconds MUST stop the scroll.
+  The "hook" field must be a punchy 4–10 word pattern interrupt (question, shock claim, or challenge).
+  The spoken script MUST start with that hook in the first breath (spoken in under 3 seconds).
+- After the hook: short punchy sentences. No fluff.
 - End with a soft CTA if provided.
 - Respect brand rules.
 - Return STRICT JSON only, no markdown.
 JSON schema:
 {{
-  "hook": "string",
-  "script": "full spoken narration including hook",
+  "hook": "4-10 word scroll-stopper for first 3 seconds",
+  "script": "full spoken narration STARTING with the hook",
   "title": "YouTube Shorts title under 70 chars",
   "description": "YouTube description with hashtags",
   "tags": ["tag1", "tag2"],
@@ -56,6 +58,7 @@ Brand / style instructions (user trained AI):
 Default Pexels vibe: {training.get('pexels_query')}
 Music mood: {training.get('music_mood')}
 Write one unique Shorts script. Never repeat previous clichés word-for-word.
+The opening 3 seconds must feel like a cold open ad — bold, confrontational, unforgettable.
 """
 
     response = client.chat.completions.create(
