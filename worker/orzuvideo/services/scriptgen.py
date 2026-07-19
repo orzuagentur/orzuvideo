@@ -29,7 +29,7 @@ JSON schema:
   "title": "YouTube Shorts title under 70 chars",
   "description": "YouTube description with hashtags",
   "tags": ["tag1", "tag2"],
-  "pexels_queries": ["query1", "query2", "query3"],
+  "pexels_queries": ["query1", "query2", "query3", "query4", "query5"],
   "subtitle_emphasis": ["WORD1", "WORD2"]
 }}
 """
@@ -40,10 +40,19 @@ def generate_script(
     *,
     user_id: str | None = None,
     job_id: str | None = None,
+    user_brief: str | None = None,
 ) -> dict[str, Any]:
     client = OpenAI(api_key=settings.openai_api_key)
     duration = int(training.get("duration_seconds") or 45)
     word_count = max(40, int(duration * 2.4))
+
+    brief_block = ""
+    if user_brief and user_brief.strip():
+        brief_block = f"""
+USER BRIEF FOR THIS VIDEO (highest priority — build the Short around this):
+\"\"\"{user_brief.strip()}\"\"\"
+Follow this brief closely for topic, angle, and message. Still respect brand rules and training style.
+"""
 
     user_prompt = f"""
 Niche: {training.get('niche')}
@@ -57,8 +66,10 @@ Brand / style instructions (user trained AI):
 \"\"\"{training.get('style_prompt')}\"\"\"
 Default Pexels vibe: {training.get('pexels_query')}
 Music mood: {training.get('music_mood')}
+{brief_block}
 Write one unique Shorts script. Never repeat previous clichés word-for-word.
 The opening 3 seconds must feel like a cold open ad — bold, confrontational, unforgettable.
+Also return 5 varied pexels_queries (different angles/scenes) for cinematic B-roll montage.
 """
 
     response = client.chat.completions.create(

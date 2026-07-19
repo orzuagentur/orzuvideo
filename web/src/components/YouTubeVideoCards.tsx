@@ -32,11 +32,13 @@ function formatCount(n: number | null | undefined) {
 export function YouTubeVideoCards({
   jobs,
   onDelete,
+  onPublish,
   busyId,
   emptyLabel = "No videos yet.",
 }: {
   jobs: VideoJob[];
   onDelete?: (youtubeVideoId: string) => void;
+  onPublish?: (jobId: string) => void;
   busyId?: string | null;
   emptyLabel?: string;
 }) {
@@ -55,6 +57,7 @@ export function YouTubeVideoCards({
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {jobs.map((job) => {
           const thumb = thumbUrl(job);
+          const canPlay = Boolean(job.youtube_video_id || job.preview_url);
           return (
             <article
               key={job.id}
@@ -73,12 +76,20 @@ export function YouTubeVideoCards({
                       alt=""
                       className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
                     />
+                  ) : job.preview_url ? (
+                    <video
+                      src={job.preview_url}
+                      className="h-full w-full object-cover"
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
                   ) : (
                     <div className="flex h-full items-center justify-center text-sm text-[color:var(--muted)]">
                       {JOB_STATUS_LABEL[job.status] || job.status}
                     </div>
                   )}
-                  {job.youtube_video_id && (
+                  {canPlay && (
                     <span className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100">
                       <span className="rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-black">
                         Play
@@ -117,6 +128,16 @@ export function YouTubeVideoCards({
                 >
                   Details
                 </button>
+                {onPublish && job.status === "ready" && (
+                  <button
+                    type="button"
+                    className="btn btn-primary text-xs"
+                    disabled={busyId === job.id}
+                    onClick={() => onPublish(job.id)}
+                  >
+                    Publish
+                  </button>
+                )}
                 {job.youtube_url && (
                   <a
                     href={job.youtube_url}
@@ -156,7 +177,15 @@ export function YouTubeVideoCards({
                 }
               : undefined
           }
-          deleting={busyId === open.youtube_video_id}
+          onPublish={
+            onPublish && open.status === "ready"
+              ? () => {
+                  onPublish(open.id);
+                  setOpen(null);
+                }
+              : undefined
+          }
+          deleting={busyId === open.youtube_video_id || busyId === open.id}
         />
       )}
     </>
@@ -167,11 +196,13 @@ function VideoDetailModal({
   job,
   onClose,
   onDelete,
+  onPublish,
   deleting,
 }: {
   job: VideoJob;
   onClose: () => void;
   onDelete?: () => void;
+  onPublish?: () => void;
   deleting?: boolean;
 }) {
   const [comments, setComments] = useState<YtComment[]>([]);
@@ -243,7 +274,7 @@ function VideoDetailModal({
         <div className="grid min-h-0 flex-1 overflow-auto lg:grid-cols-[1.05fr_0.95fr]">
           <div className="space-y-4 border-b border-[color:var(--line)] p-4 lg:border-b-0 lg:border-r">
             {job.youtube_video_id ? (
-              <div className="aspect-[9/16] max-h-[60vh] overflow-hidden rounded-xl bg-black mx-auto w-full max-w-sm">
+              <div className="mx-auto aspect-[9/16] max-h-[60vh] w-full max-w-sm overflow-hidden rounded-xl bg-black">
                 <iframe
                   title="preview"
                   className="h-full w-full"
@@ -252,9 +283,18 @@ function VideoDetailModal({
                   allowFullScreen
                 />
               </div>
+            ) : job.preview_url ? (
+              <div className="mx-auto aspect-[9/16] max-h-[60vh] w-full max-w-sm overflow-hidden rounded-xl bg-black">
+                <video
+                  src={job.preview_url}
+                  className="h-full w-full"
+                  controls
+                  playsInline
+                />
+              </div>
             ) : (
               <div className="rounded-xl border border-[color:var(--line)] p-6 text-sm text-[color:var(--muted)]">
-                Preview available after publish. Status:{" "}
+                Preview available after the worker finishes. Status:{" "}
                 {JOB_STATUS_LABEL[job.status] || job.status}
               </div>
             )}
@@ -271,6 +311,16 @@ function VideoDetailModal({
             )}
 
             <div className="flex flex-wrap gap-2">
+              {onPublish && (
+                <button
+                  type="button"
+                  className="btn btn-primary text-sm"
+                  disabled={deleting}
+                  onClick={onPublish}
+                >
+                  Publish to YouTube
+                </button>
+              )}
               {job.youtube_url && (
                 <a
                   href={job.youtube_url}

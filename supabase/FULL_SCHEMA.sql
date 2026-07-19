@@ -94,6 +94,7 @@ begin
       'fetching_media',
       'editing',
       'uploading',
+      'ready',
       'published',
       'failed'
     );
@@ -320,3 +321,17 @@ create policy "Users manage own comment replies"
   on public.comment_replies for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+-- Ready = edited Short waiting for manual YouTube publish
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_enum e
+    join pg_type t on t.oid = e.enumtypid
+    where t.typname = 'job_status' and e.enumlabel = 'ready'
+  ) then
+    alter type public.job_status add value 'ready';
+  end if;
+end $$;
+

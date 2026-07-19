@@ -6,13 +6,16 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 ROOT = Path(__file__).resolve().parents[1]
+# Always load worker/.env (not only CWD), so Jamendo key is found
+load_dotenv(ROOT / ".env", override=False)
+load_dotenv(override=False)
+
 TEMP_DIR = Path(os.getenv("TEMP_DIR", ROOT / "temp"))
 ASSETS_DIR = Path(os.getenv("ASSETS_DIR", ROOT / "assets"))
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 (ASSETS_DIR / "fonts").mkdir(parents=True, exist_ok=True)
+(ASSETS_DIR / "music").mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(frozen=True)

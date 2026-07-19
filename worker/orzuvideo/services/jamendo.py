@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import random
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
-from orzuvideo.config import settings
+from orzuvideo.config import ASSETS_DIR, settings
 
 JAMENDO_TRACKS_URL = "https://api.jamendo.com/v3.0/tracks/"
 
-# Map free-text moods → Jamendo tags that actually return results
+# Map free-text moods to Jamendo tags that actually return results
 MOOD_TAG_MAP: dict[str, list[str]] = {
     "cinematic": ["soundtrack", "ambient", "orchestral"],
     "motivational": ["epic", "upbeat", "energetic"],
@@ -43,7 +45,6 @@ def _mood_tags(mood: str) -> list[str]:
     tags: list[str] = []
     for w in words:
         tags.extend(MOOD_TAG_MAP.get(w, [w]))
-    # Dedupe preserve order
     seen: set[str] = set()
     out: list[str] = []
     for t in tags:
@@ -84,6 +85,7 @@ def search_tracks(mood: str) -> list[dict]:
         {"tags": tags[0], "vocalinstrumental": "instrumental", "order": "popularity_total"},
         {"tags": "+".join(tags[:2]), "order": "popularity_total"},
         {"fuzzytags": tags[0], "order": "popularity_month"},
+        {"tags": "electronic", "vocalinstrumental": "instrumental", "order": "popularity_total"},
         {"order": "popularity_total", "vocalinstrumental": "instrumental"},
         {"order": "popularity_total"},
     ]
@@ -101,7 +103,6 @@ def search_tracks(mood: str) -> list[dict]:
 
 
 def _pick_playable(tracks: list[dict]) -> dict | None:
-    # Prefer downloadable instrumentals; fall back to stream URL
     preferred = [
         t
         for t in tracks
@@ -113,19 +114,107 @@ def _pick_playable(tracks: list[dict]) -> dict | None:
     return random.choice(pool)
 
 
-def download_background_music(mood: str, dest: Path) -> JamendoTrack | None:
+def _cache_music(src: Path) -> None:
+    """Keep last good bed so future jobs never go silent."""
+    cache_dir = ASSETS_DIR / "music"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(src, cache_dir / "last_bed.mp3")
+    except Exception as exc:
+        print(f"Music cache write failed: {exc}")
+
+
+def _local_fallback(dest: Path) -> JamendoTrack | None:
+    local = ASSETS_DIR / "music"
+    if not local.exists():
+        return None
+    files = sorted(
+        [*(local.glob("*.mp3")), *(local.glob("*.wav"))],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not files:
+        return None
+    pick_file = files[0] if files[0].name == "last_bed.mp3" else random.choice(files)
+    dest.write_bytes(pick_file.read_bytes())
+    print(f"Using local music fallback: {pick_file.name} ({dest.stat().st_size} bytes)")
+    return JamendoTrack(
+        id="local",
+        name=pick_file.stem,
+        artist="Local asset",
+        shareurl="",
+        download_url="",
+        path=dest,
+    )
+
+
+def _generate_ambient_bed(dest: Path, seconds: float = 90.0) -> JamendoTrack:
+    """Last-resort instrumental bed via ffmpeg (never ship silent Shorts)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fade = max(1.0, seconds - 1.5)
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=130:sample_rate=44100:duration={seconds:.1f}",
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=196:sample_rate=44100:duration={seconds:.1f}",
+        "-f",
+        "lavfi",
+        "-i",
+        f"sine=frequency=262:sample_rate=44100:duration={seconds:.1f}",
+        "-filter_complex",
+        (
+            "[0:a][1:a][2:a]amix=inputs=3:duration=longest,"
+            "lowpass=f=900,highpass=f=70,volume=0.55,"
+            f"afade=t=in:st=0:d=1,afade=t=out:st={fade:.1f}:d=1.5"
+        ),
+        "-t",
+        f"{seconds:.1f}",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
+        str(dest),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not dest.exists() or dest.stat().st_size < 5_000:
+        raise RuntimeError(f"Failed to generate ambient music bed:\n{proc.stderr[-1500:]}")
+    print(f"Generated ambient music bed ({dest.stat().st_size} bytes)")
+    _cache_music(dest)
+    return JamendoTrack(
+        id="generated",
+        name="Ambient bed",
+        artist="OrzuVideo",
+        shareurl="",
+        download_url="",
+        path=dest,
+    )
+
+
+def download_background_music(mood: str, dest: Path) -> JamendoTrack:
     """
-    Download royalty-free bed from Jamendo.
-    Falls back to local assets/music if API unavailable.
+    Always return a playable music bed.
+    Prefer Jamendo -> local cache -> generated ambient.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
+    client_id = (settings.jamendo_client_id or "").strip()
+    print(f"Music: JAMENDO_CLIENT_ID={'set' if client_id else 'MISSING'}")
 
-    if settings.jamendo_client_id:
+    if client_id:
         try:
             tracks = search_tracks(mood or "cinematic motivational")
+            if not tracks:
+                tracks = search_tracks("epic soundtrack")
             pick = _pick_playable(tracks)
             if pick:
                 url = pick.get("audiodownload") or pick.get("audio")
+                if not url:
+                    raise RuntimeError("Jamendo track has no audio URL")
                 with httpx.Client(timeout=120.0, follow_redirects=True) as client:
                     r = client.get(url)
                     r.raise_for_status()
@@ -136,7 +225,7 @@ def download_background_music(mood: str, dest: Path) -> JamendoTrack | None:
                     f"Jamendo music: {pick.get('name')} by {pick.get('artist_name')} "
                     f"({len(r.content)} bytes)"
                 )
-                return JamendoTrack(
+                track = JamendoTrack(
                     id=str(pick.get("id")),
                     name=str(pick.get("name") or "Unknown"),
                     artist=str(pick.get("artist_name") or "Unknown"),
@@ -144,30 +233,21 @@ def download_background_music(mood: str, dest: Path) -> JamendoTrack | None:
                     download_url=str(url),
                     path=dest,
                 )
+                _cache_music(dest)
+                return track
             print("Jamendo: no playable tracks found")
         except Exception as exc:
-            print(f"Jamendo music fetch failed, trying local fallback: {exc}")
+            print(f"Jamendo music fetch failed, trying fallbacks: {exc}")
 
-    local = Path(__file__).resolve().parents[2] / "assets" / "music"
-    if local.exists():
-        files = list(local.glob("*.mp3")) + list(local.glob("*.wav"))
-        if files:
-            pick_file = random.choice(files)
-            dest.write_bytes(pick_file.read_bytes())
-            return JamendoTrack(
-                id="local",
-                name=pick_file.stem,
-                artist="Local asset",
-                shareurl="",
-                download_url="",
-                path=dest,
-            )
+    local = _local_fallback(dest)
+    if local:
+        return local
 
-    return None
+    return _generate_ambient_bed(dest)
 
 
 def attribution_line(track: JamendoTrack | None) -> str:
-    if not track or track.id == "local":
+    if not track or track.id in ("local", "generated"):
         return ""
     link = f" {track.shareurl}" if track.shareurl else ""
     return f'Music: "{track.name}" by {track.artist} via Jamendo{link}'

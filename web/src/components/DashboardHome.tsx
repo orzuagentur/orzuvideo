@@ -104,10 +104,24 @@ export function DashboardHome({
             </li>
           </ul>
           <div className="mt-5 flex flex-col gap-2">
-            <Link href="/dashboard/channel" className="btn btn-ghost text-sm">
-              Open channel
-            </Link>
-            <Link href="/dashboard/training" className="btn btn-primary text-sm">
+            {profile?.youtube_connected ? (
+              <>
+                <Link href="/dashboard/channel" className="btn btn-ghost text-sm">
+                  Open channel
+                </Link>
+                <Link href="/dashboard/channels" className="btn btn-ghost text-sm">
+                  Switch channel
+                </Link>
+                <a href="/api/youtube/connect" className="btn btn-primary text-sm">
+                  Reconnect YouTube
+                </a>
+              </>
+            ) : (
+              <a href="/api/youtube/connect" className="btn btn-primary text-sm">
+                Connect YouTube
+              </a>
+            )}
+            <Link href="/dashboard/training" className="btn btn-ghost text-sm">
               Train AI
             </Link>
           </div>

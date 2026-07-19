@@ -13,7 +13,13 @@ from orzuvideo.services import db
 from orzuvideo.services.jamendo import attribution_line, download_background_music
 from orzuvideo.services.pexels import download_stock_clips
 from orzuvideo.services.scriptgen import generate_script
+from orzuvideo.services.storage import upload_preview
 from orzuvideo.services.youtube import upload_short
+
+
+def _job_meta(job: dict) -> dict:
+    meta = job.get("metadata") or {}
+    return meta if isinstance(meta, dict) else {}
 
 
 def process_job(job: dict) -> None:
@@ -22,6 +28,9 @@ def process_job(job: dict) -> None:
     user_id = job["user_id"]
     work = TEMP_DIR / job_id
     work.mkdir(parents=True, exist_ok=True)
+    meta0 = _job_meta(job)
+    publish = bool(meta0.get("publish", True))
+    user_brief = (meta0.get("user_brief") or "").strip() or None
 
     try:
         training = db.get_training(sb, user_id)
@@ -29,12 +38,62 @@ def process_job(job: dict) -> None:
             raise RuntimeError("AI training not configured. Train the AI once in the dashboard.")
 
         profile = db.get_profile(sb, user_id)
-        if not profile or not profile.get("youtube_connected"):
+        if publish and (not profile or not profile.get("youtube_connected")):
             raise RuntimeError("YouTube is not connected.")
+
+        # Publish-only path: already-rendered draft
+        if meta0.get("publish_existing") and job.get("preview_url"):
+            db.update_job(sb, job_id, status="uploading")
+            if not profile or not profile.get("youtube_connected"):
+                raise RuntimeError("YouTube is not connected.")
+            # Prefer local file if still present, else download preview
+            local = Path(job.get("video_path") or "")
+            video_file = local if local.exists() else (work / "from_preview.mp4")
+            if not local.exists():
+                import httpx
+
+                with httpx.Client(timeout=180.0, follow_redirects=True) as client:
+                    r = client.get(job["preview_url"])
+                    r.raise_for_status()
+                    video_file.write_bytes(r.content)
+            yt = upload_short(
+                profile,
+                video_file,
+                title=job.get("title") or "Short",
+                description=job.get("description") or "",
+                tags=job.get("tags") or ["shorts"],
+            )
+            if yt.get("access_token"):
+                sb.table("profiles").update(
+                    {"youtube_access_token": yt["access_token"]}
+                ).eq("id", user_id).execute()
+            db.update_job(
+                sb,
+                job_id,
+                status="published",
+                youtube_video_id=yt["youtube_video_id"],
+                youtube_url=yt["youtube_url"],
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
+            db.record_published(
+                sb,
+                user_id=user_id,
+                job_id=job_id,
+                youtube_video_id=yt["youtube_video_id"],
+                youtube_url=yt["youtube_url"],
+                title=job.get("title") or "Short",
+                script_text=job.get("script_text") or "",
+            )
+            return
 
         # 1) Script
         db.update_job(sb, job_id, status="generating_script")
-        script_data = generate_script(training, user_id=user_id, job_id=job_id)
+        script_data = generate_script(
+            training,
+            user_id=user_id,
+            job_id=job_id,
+            user_brief=user_brief,
+        )
         db.update_job(
             sb,
             job_id,
@@ -42,7 +101,11 @@ def process_job(job: dict) -> None:
             title=script_data["title"],
             description=script_data["description"],
             tags=script_data["tags"],
-            metadata={"hook": script_data["hook"], "pexels_queries": script_data["pexels_queries"]},
+            metadata={
+                **meta0,
+                "hook": script_data["hook"],
+                "pexels_queries": script_data["pexels_queries"],
+            },
         )
 
         # 2) Voice + timings
@@ -66,43 +129,39 @@ def process_job(job: dict) -> None:
             cost_usd=estimate_elevenlabs_cost(chars),
         )
 
-        # 3) Media
+        # 3) Media — more clips for pro montage
         db.update_job(sb, job_id, status="fetching_media")
         queries = script_data["pexels_queries"] or [training.get("pexels_query")]
-        clips = download_stock_clips(queries, work / "clips", count=3)
+        clips = download_stock_clips(queries, work / "clips", count=5)
         jamendo = download_background_music(
             training.get("music_mood") or "cinematic motivational",
             work / "music.mp3",
         )
-        if jamendo is None and settings.jamendo_client_id:
-            # Hard retry with safe popular tags
-            jamendo = download_background_music("epic soundtrack", work / "music.mp3")
-        music_path = jamendo.path if jamendo else None
-        if music_path is None:
-            print("WARNING: no background music attached to this Short")
+        music_path = jamendo.path
+        if music_path is None or not music_path.exists():
+            raise RuntimeError("Background music missing after download/fallback")
+        print(f"Background music ready: {music_path} ({music_path.stat().st_size} bytes)")
         credit = attribution_line(jamendo)
         description = script_data["description"]
         meta = {
+            **meta0,
             "hook": script_data["hook"],
             "pexels_queries": script_data["pexels_queries"],
-            "jamendo": None,
-            "music_attached": bool(music_path),
-        }
-        if jamendo:
-            meta["jamendo"] = {
+            "jamendo": {
                 "id": jamendo.id,
                 "name": jamendo.name,
                 "artist": jamendo.artist,
                 "url": jamendo.shareurl,
-            }
+            },
+            "music_attached": True,
+            "music_bytes": music_path.stat().st_size,
+            "publish": publish,
+            "user_brief": user_brief,
+            "clip_count": len(clips),
+        }
         if credit:
             description = f"{description}\n\n{credit}"
-        db.update_job(
-            sb,
-            job_id,
-            description=description,
-            metadata=meta,
-        )
+        db.update_job(sb, job_id, description=description, metadata=meta)
 
         # 4) Edit
         db.update_job(sb, job_id, status="editing")
@@ -119,7 +178,30 @@ def process_job(job: dict) -> None:
         )
         db.update_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
 
-        # 5) Upload
+        # Always upload preview for in-app playback
+        preview_url = None
+        try:
+            preview_url = upload_preview(
+                sb, user_id=user_id, job_id=job_id, video_path=out_video
+            )
+            db.update_job(sb, job_id, preview_url=preview_url)
+            print(f"Preview uploaded: {preview_url}")
+        except Exception as exc:
+            print(f"Preview upload failed (continuing): {exc}")
+
+        # 5) Draft only — no YouTube
+        if not publish:
+            db.update_job(
+                sb,
+                job_id,
+                status="ready",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                metadata={**meta, "preview_uploaded": bool(preview_url)},
+            )
+            print(f"Draft ready (not published): {job_id}")
+            return
+
+        # 6) Publish to YouTube
         db.update_job(sb, job_id, status="uploading")
         yt = upload_short(
             profile,
@@ -151,9 +233,9 @@ def process_job(job: dict) -> None:
             title=script_data["title"],
             script_text=script_data["script"],
         )
-        from orzuvideo.services.usage import log_usage
+        from orzuvideo.services.usage import log_usage as log_usage2
 
-        log_usage(
+        log_usage2(
             user_id=user_id,
             job_id=job_id,
             provider="youtube",
@@ -172,14 +254,13 @@ def process_job(job: dict) -> None:
         )
         raise
     finally:
-        # Keep failed artifacts for debug; clean success after short delay
         if job.get("keep_temp"):
             return
         try:
-            # Only wipe if published
             current = (
                 sb.table("video_jobs").select("status").eq("id", job_id).limit(1).execute()
             )
+            # Keep drafts locally for a bit; wipe only after YouTube publish
             if current.data and current.data[0]["status"] == "published":
                 shutil.rmtree(work, ignore_errors=True)
         except Exception:

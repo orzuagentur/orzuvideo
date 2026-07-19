@@ -5,6 +5,7 @@ export const JOB_STATUS_LABEL: Record<string, string> = {
   fetching_media: "Fetching footage",
   editing: "Editing",
   uploading: "Uploading",
+  ready: "Ready (draft)",
   published: "Published",
   failed: "Failed",
 };
@@ -20,6 +21,7 @@ export const QUEUE_STATUSES = new Set([
 
 export function statusColor(status: string): string {
   if (status === "published") return "var(--success)";
+  if (status === "ready") return "var(--accent)";
   if (status === "failed") return "var(--danger)";
   if (status === "queued") return "var(--accent)";
   return "#7eb6ff";

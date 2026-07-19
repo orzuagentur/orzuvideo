@@ -30,6 +30,27 @@ export function ChannelStudio({
     router.refresh();
   }
 
+  async function disconnect() {
+    if (
+      !confirm(
+        "Disconnect this YouTube channel? Publishing and comment sync will stop until you connect again.",
+      )
+    ) {
+      return;
+    }
+    setBusy("disconnect");
+    setMsg(null);
+    const res = await fetch("/api/youtube/disconnect", { method: "POST" });
+    const data = await res.json();
+    setBusy(null);
+    if (!res.ok) {
+      setMsg(data.error || "Disconnect failed");
+      return;
+    }
+    setMsg("Channel disconnected.");
+    router.refresh();
+  }
+
   async function removeVideo(youtubeVideoId: string) {
     if (!confirm("Delete this video from YouTube?")) return;
     setBusy(youtubeVideoId);
@@ -54,11 +75,13 @@ export function ChannelStudio({
       <div className="panel rise space-y-4 p-6">
         <h1 className="text-2xl font-semibold">Channel</h1>
         <p className="text-sm text-[color:var(--muted)]">
-          Connect a YouTube channel to see subscribers, views and published Shorts.
+          Connect a YouTube channel to publish Shorts and see stats.
         </p>
-        <a href="/api/youtube/connect" className="btn btn-primary">
-          Connect YouTube
-        </a>
+        <div className="flex flex-wrap gap-2">
+          <a href="/api/youtube/connect" className="btn btn-primary">
+            Connect YouTube
+          </a>
+        </div>
       </div>
     );
   }
@@ -79,31 +102,51 @@ export function ChannelStudio({
 
       {msg && <p className="text-sm text-[color:var(--accent)]">{msg}</p>}
 
-      <section className="panel rise flex flex-wrap items-center gap-5 p-6">
-        {profile.youtube_thumbnail_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={profile.youtube_thumbnail_url}
-            alt=""
-            className="h-20 w-20 rounded-full object-cover"
-          />
-        ) : (
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-black/30 text-sm">
-            YT
+      <section className="panel rise space-y-5 p-6">
+        <div className="flex flex-wrap items-center gap-5">
+          {profile.youtube_thumbnail_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={profile.youtube_thumbnail_url}
+              alt=""
+              className="h-20 w-20 rounded-full object-cover"
+            />
+          ) : (
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-black/30 text-sm">
+              YT
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-semibold">
+              {profile.youtube_channel_title || "YouTube channel"}
+            </h2>
+            <p className="mt-1 text-sm text-[color:var(--muted)]">
+              {profile.youtube_custom_url || profile.youtube_channel_id}
+            </p>
           </div>
-        )}
-        <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-semibold">
-            {profile.youtube_channel_title || "YouTube channel"}
-          </h2>
-          <p className="mt-1 text-sm text-[color:var(--muted)]">
-            {profile.youtube_custom_url || profile.youtube_channel_id}
-          </p>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <Stat label="Subscribers" value={profile.youtube_subscriber_count ?? 0} />
+            <Stat label="Views" value={profile.youtube_view_count ?? 0} />
+            <Stat label="Videos" value={profile.youtube_video_count ?? 0} />
+          </div>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-center">
-          <Stat label="Subscribers" value={profile.youtube_subscriber_count ?? 0} />
-          <Stat label="Views" value={profile.youtube_view_count ?? 0} />
-          <Stat label="Videos" value={profile.youtube_video_count ?? 0} />
+
+        <div className="flex flex-wrap gap-2 border-t border-[color:var(--line)] pt-4">
+          <a href="/dashboard/channels" className="btn btn-ghost text-sm">
+            Switch channel
+          </a>
+          <a href="/api/youtube/connect" className="btn btn-primary text-sm">
+            Reconnect / change account
+          </a>
+          <button
+            type="button"
+            className="btn btn-ghost text-sm"
+            style={{ color: "var(--danger)" }}
+            disabled={busy === "disconnect"}
+            onClick={disconnect}
+          >
+            {busy === "disconnect" ? "Disconnecting…" : "Disconnect"}
+          </button>
         </div>
       </section>
 
