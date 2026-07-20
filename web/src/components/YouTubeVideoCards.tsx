@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { VideoJob } from "@/lib/types";
 import { JOB_STATUS_LABEL, statusColor } from "@/lib/job-status";
+import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
 
 type YtComment = {
   id: string;
@@ -23,10 +24,11 @@ function thumbUrl(job: VideoJob) {
 }
 
 function formatCount(n: number | null | undefined) {
-  const v = n ?? 0;
+  const v = Number(n ?? 0);
+  if (!Number.isFinite(v) || v < 0) return "0";
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
-  return String(v);
+  return String(Math.round(v));
 }
 
 export function YouTubeVideoCards({
@@ -43,8 +45,60 @@ export function YouTubeVideoCards({
   emptyLabel?: string;
 }) {
   const [open, setOpen] = useState<VideoJob | null>(null);
+  const [liveJobs, setLiveJobs] = useState(jobs);
 
-  if (jobs.length === 0) {
+  useEffect(() => {
+    setLiveJobs(jobs);
+  }, [jobs]);
+
+  useEffect(() => {
+    const published = jobs.filter((j) => j.youtube_video_id && j.status === "published");
+    if (published.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/youtube/video-stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobIds: published.map((j) => j.id) }),
+        });
+        const data = await res.json();
+        if (!res.ok || cancelled || !Array.isArray(data.items)) return;
+        setLiveJobs((prev) =>
+          prev.map((j) => {
+            const hit = data.items.find(
+              (i: { id: string }) => i.id === j.id,
+            ) as
+              | {
+                  id: string;
+                  view_count: number;
+                  like_count: number;
+                  comment_count: number;
+                  thumbnail_url?: string | null;
+                  title?: string;
+                }
+              | undefined;
+            if (!hit) return j;
+            return {
+              ...j,
+              view_count: hit.view_count,
+              like_count: hit.like_count,
+              comment_count: hit.comment_count,
+              thumbnail_url: hit.thumbnail_url || j.thumbnail_url,
+              title: hit.title || j.title,
+            };
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobs]);
+
+  if (liveJobs.length === 0) {
     return (
       <p className="rounded-xl border border-[color:var(--line)] p-8 text-center text-sm text-[color:var(--muted)]">
         {emptyLabel}
@@ -55,17 +109,39 @@ export function YouTubeVideoCards({
   return (
     <>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-        {jobs.map((job) => {
+        {liveJobs.map((job) => {
           const thumb = thumbUrl(job);
           const canPlay = Boolean(job.youtube_video_id || job.preview_url);
+          const menuItems = [
+            ...(job.youtube_url
+              ? [{ label: "YouTube", href: job.youtube_url }]
+              : []),
+            ...(onDelete && job.youtube_video_id
+              ? [
+                  {
+                    label: busyId === job.youtube_video_id ? "Deleting..." : "Delete",
+                    danger: true as const,
+                    disabled: busyId === job.youtube_video_id,
+                    onClick: () => onDelete(job.youtube_video_id!),
+                  },
+                ]
+              : []),
+          ];
+
           return (
             <article
               key={job.id}
-              className="group overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] transition hover:border-[color:rgba(232,165,75,0.35)]"
+              className="group relative flex flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] transition hover:border-[color:rgba(232,165,75,0.35)]"
             >
+              {menuItems.length > 0 && (
+                <CardMenuSlot>
+                  <CardMenu items={menuItems} />
+                </CardMenuSlot>
+              )}
+
               <button
                 type="button"
-                className="relative block w-full text-left"
+                className="relative block w-full flex-1 text-left"
                 onClick={() => setOpen(job)}
               >
                 <div className="relative aspect-video overflow-hidden bg-black/40">
@@ -107,59 +183,34 @@ export function YouTubeVideoCards({
                   </span>
                 </div>
                 <div className="space-y-2 p-3">
-                  <h3 className="line-clamp-2 text-sm font-semibold leading-snug">
+                  <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug">
                     {job.title || "Untitled Short"}
                   </h3>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-[color:var(--muted)]">
-                    <span>{formatCount(job.view_count)} views</span>
-                    <span>{formatCount(job.like_count)} likes</span>
-                    <span>{formatCount(job.comment_count)} comments</span>
+                  <div className="grid grid-cols-3 gap-1 text-center text-[11px] text-[color:var(--muted)]">
+                    <div className="rounded-md bg-black/20 px-1 py-1.5">
+                      <p className="font-semibold text-[color:var(--fg)]">
+                        {formatCount(job.view_count)}
+                      </p>
+                      <p>views</p>
+                    </div>
+                    <div className="rounded-md bg-black/20 px-1 py-1.5">
+                      <p className="font-semibold text-[color:var(--fg)]">
+                        {formatCount(job.like_count)}
+                      </p>
+                      <p>likes</p>
+                    </div>
+                    <div className="rounded-md bg-black/20 px-1 py-1.5">
+                      <p className="font-semibold text-[color:var(--fg)]">
+                        {formatCount(job.comment_count)}
+                      </p>
+                      <p>comments</p>
+                    </div>
                   </div>
                   <p className="text-[11px] text-[color:var(--muted)]">
-                    {new Date(job.completed_at || job.created_at).toLocaleDateString()}
+                    {formatFixedDate(job.completed_at || job.created_at)}
                   </p>
                 </div>
               </button>
-              <div className="flex gap-2 border-t border-[color:var(--line)] px-3 py-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost flex-1 text-xs"
-                  onClick={() => setOpen(job)}
-                >
-                  Details
-                </button>
-                {onPublish && job.status === "ready" && (
-                  <button
-                    type="button"
-                    className="btn btn-primary text-xs"
-                    disabled={busyId === job.id}
-                    onClick={() => onPublish(job.id)}
-                  >
-                    Publish
-                  </button>
-                )}
-                {job.youtube_url && (
-                  <a
-                    href={job.youtube_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-ghost text-xs"
-                  >
-                    YouTube
-                  </a>
-                )}
-                {onDelete && job.youtube_video_id && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost text-xs"
-                    style={{ color: "var(--danger)" }}
-                    disabled={busyId === job.youtube_video_id}
-                    onClick={() => onDelete(job.youtube_video_id!)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
             </article>
           );
         })}
@@ -326,7 +377,7 @@ function VideoDetailModal({
                   href={job.youtube_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="btn btn-primary text-sm"
+                  className="btn btn-ghost text-sm"
                 >
                   Open on YouTube
                 </a>
@@ -354,7 +405,7 @@ function VideoDetailModal({
                 onClick={() => void loadComments()}
                 disabled={loadingComments || !job.youtube_video_id}
               >
-                {loadingComments ? "Loading…" : "Refresh"}
+                {loadingComments ? "Loading..." : "Refresh"}
               </button>
             </div>
 
@@ -365,7 +416,7 @@ function VideoDetailModal({
             ) : commentError ? (
               <p className="text-sm text-[color:var(--danger)]">{commentError}</p>
             ) : loadingComments ? (
-              <p className="text-sm text-[color:var(--muted)]">Loading comments…</p>
+              <p className="text-sm text-[color:var(--muted)]">Loading comments...</p>
             ) : comments.length === 0 ? (
               <p className="text-sm text-[color:var(--muted)]">No comments yet.</p>
             ) : (
@@ -388,7 +439,7 @@ function VideoDetailModal({
                       <p className="text-xs text-[color:var(--muted)]">
                         <span className="font-medium text-[color:var(--fg)]">{c.author}</span>
                         {c.publishedAt
-                          ? ` · ${new Date(c.publishedAt).toLocaleDateString()}`
+                          ? ` · ${formatFixedDate(c.publishedAt)}`
                           : ""}
                       </p>
                       <p className="mt-1 whitespace-pre-wrap text-sm leading-snug">{c.text}</p>
@@ -406,4 +457,12 @@ function VideoDetailModal({
       </div>
     </div>
   );
+}
+
+/** Locale-independent date so SSR and client match. */
+function formatFixedDate(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
 }

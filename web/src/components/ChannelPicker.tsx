@@ -11,9 +11,17 @@ type YtChannel = {
   customUrl: string | null;
 };
 
+type Saved = {
+  channel_id: string;
+  title: string | null;
+  thumbnail_url: string | null;
+  is_active: boolean;
+};
+
 export function ChannelPicker() {
   const router = useRouter();
-  const [channels, setChannels] = useState<YtChannel[]>([]);
+  const [available, setAvailable] = useState<YtChannel[]>([]);
+  const [saved, setSaved] = useState<Saved[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -29,11 +37,21 @@ export function ChannelPicker() {
       if (cancelled) return;
       setLoading(false);
       if (!res.ok) {
-        setError(data.error || "Could not load channels");
+        setError(data.error || data.googleError || "Could not load channels");
+        setSaved(data.saved || []);
         return;
       }
-      setChannels(data.channels || []);
-      setSelectedId(data.selectedChannelId || data.channels?.[0]?.id || null);
+      setAvailable(data.available || []);
+      setSaved(data.saved || []);
+      setSelectedId(
+        data.selectedChannelId ||
+          data.saved?.[0]?.channel_id ||
+          data.available?.[0]?.id ||
+          null,
+      );
+      if (data.googleError && !(data.available || []).length) {
+        setError(data.googleError);
+      }
     })();
     return () => {
       cancelled = true;
@@ -42,128 +60,142 @@ export function ChannelPicker() {
 
   async function confirm() {
     if (!selectedId) return;
-    const channel = channels.find((c) => c.id === selectedId);
-    if (!channel) return;
-
     setSaving(true);
     setError(null);
     const res = await fetch("/api/youtube/channels", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        channelId: channel.id,
-        channelTitle: channel.title,
+        action: "add",
+        channelId: selectedId,
       }),
     });
     const data = await res.json();
     setSaving(false);
-
     if (!res.ok) {
       setError(data.error || "Could not save channel");
       return;
     }
-
-    router.push("/dashboard?youtube=connected");
+    router.push("/dashboard/channel");
     router.refresh();
   }
+
+  const savedIds = new Set(saved.map((s) => s.channel_id));
 
   return (
     <div className="panel rise space-y-5 p-6">
       <div>
-        <h1 className="text-xl font-semibold">Choose YouTube channel</h1>
-        <p className="mt-2 text-sm text-[color:var(--muted)]">
-          Pick which channel will receive your Shorts. If your channel is
-          missing, reconnect and select the correct Brand Account in Google.
+        <h1 className="text-xl font-semibold">Add YouTube channel</h1>
+        <p className="mt-1 text-sm text-[color:var(--muted)]">
+          Choose a channel from this Google account.
         </p>
       </div>
 
+      {saved.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-[color:var(--muted)]">Saved</h2>
+          <ul className="space-y-2">
+            {saved.map((c) => (
+              <li
+                key={c.channel_id}
+                className="flex items-center gap-3 rounded-xl border border-[color:var(--line)] px-3 py-2 text-sm"
+              >
+                {c.thumbnail_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={c.thumbnail_url}
+                    alt=""
+                    className="h-9 w-9 rounded-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-[10px]">
+                    YT
+                  </span>
+                )}
+                <span className="flex-1 font-medium">{c.title || c.channel_id}</span>
+                {c.is_active && (
+                  <span className="text-xs" style={{ color: "var(--accent)" }}>
+                    Active
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {loading && (
-        <p className="text-sm text-[color:var(--muted)]">Loading channels…</p>
+        <p className="text-sm text-[color:var(--muted)]">Loading...</p>
       )}
 
       {error && (
         <div className="space-y-3">
           <p className="text-sm text-[color:var(--danger)]">{error}</p>
           <a href="/api/youtube/connect" className="btn btn-primary text-sm">
-            Reconnect YouTube
+            Connect Google
           </a>
         </div>
       )}
 
-      {!loading && !error && channels.length === 0 && (
-        <div className="space-y-3">
-          <p className="text-sm text-[color:var(--muted)]">
-            No channels found on this Google account.
-          </p>
-          <a href="/api/youtube/connect" className="btn btn-primary text-sm">
-            Try another Google account
-          </a>
-        </div>
-      )}
-
-      <ul className="space-y-3">
-        {channels.map((channel) => {
-          const active = selectedId === channel.id;
-          return (
-            <li key={channel.id}>
-              <button
-                type="button"
-                onClick={() => setSelectedId(channel.id)}
-                className="flex w-full items-center gap-4 rounded-xl border p-4 text-left transition"
-                style={{
-                  borderColor: active
-                    ? "rgba(232,165,75,0.7)"
-                    : "var(--line)",
-                  background: active
-                    ? "rgba(232,165,75,0.08)"
-                    : "transparent",
-                }}
-              >
-                {channel.thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={channel.thumbnail}
-                    alt=""
-                    className="h-12 w-12 rounded-full object-cover"
-                  />
-                ) : (
-                  <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[color:var(--bg-elevated)] text-sm">
-                    YT
-                  </span>
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{channel.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-[color:var(--muted)]">
-                    {channel.customUrl || channel.id}
-                  </span>
-                </span>
-                <span
-                  className="h-4 w-4 rounded-full border"
+      {!loading && available.length > 0 && (
+        <ul className="space-y-2">
+          {available.map((channel) => {
+            const active = selectedId === channel.id;
+            const already = savedIds.has(channel.id);
+            return (
+              <li key={channel.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(channel.id)}
+                  className="flex w-full items-center gap-3 rounded-xl border p-3 text-left transition"
                   style={{
-                    borderColor: active ? "var(--accent)" : "var(--line)",
-                    background: active ? "var(--accent)" : "transparent",
+                    borderColor: active
+                      ? "rgba(232,165,75,0.7)"
+                      : "var(--line)",
+                    background: active
+                      ? "rgba(232,165,75,0.08)"
+                      : "transparent",
                   }}
-                />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                >
+                  {channel.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={channel.thumbnail}
+                      alt=""
+                      className="h-11 w-11 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[color:var(--bg-elevated)] text-sm">
+                      YT
+                    </span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{channel.title}</span>
+                    <span className="mt-0.5 block truncate text-xs text-[color:var(--muted)]">
+                      {already ? "Already added" : channel.customUrl || channel.id}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
 
-      <div className="flex flex-wrap gap-3 pt-2">
+      <div className="flex flex-wrap gap-2 border-t border-[color:var(--line)] pt-4">
         <button
           className="btn btn-primary"
           disabled={!selectedId || saving || loading}
-          onClick={confirm}
+          onClick={() => void confirm()}
         >
-          {saving ? "Saving…" : "Use this channel"}
+          {saving ? "Saving..." : "Add channel"}
         </button>
-        <Link href="/dashboard" className="btn btn-ghost">
+        <a href="/api/youtube/connect" className="btn btn-ghost text-sm">
+          + Google account
+        </a>
+        <Link href="/dashboard/channel" className="btn btn-ghost text-sm">
           Cancel
         </Link>
-        <a href="/api/youtube/connect" className="btn btn-ghost text-sm">
-          Switch Google account
-        </a>
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ from orzuvideo.services import db
 from orzuvideo.services.heygen import heygen_configured, render_avatar_reel
 from orzuvideo.services.instagram_publish import publish_reel, token_for_publish
 from orzuvideo.services.scriptgen import generate_script
-from orzuvideo.services.storage import upload_audio, upload_preview
+from orzuvideo.services.storage import storage_meta, upload_audio, upload_preview
 from orzuvideo.services.usage import estimate_elevenlabs_cost, log_usage
 
 
@@ -161,7 +161,8 @@ def process_instagram_job(job: dict[str, Any]) -> None:
             meta={"platform": "instagram"},
         )
 
-        audio_url = upload_audio(sb, user_id=user_id, job_id=job_id, audio_path=voice_path)
+        audio_stored = upload_audio(sb, user_id=user_id, job_id=job_id, audio_path=voice_path)
+        audio_url = audio_stored.public_url
         print(f"Public audio for HeyGen: {audio_url}")
 
         # 3) HeyGen avatar
@@ -177,10 +178,17 @@ def process_instagram_job(job: dict[str, Any]) -> None:
 
         # 4) Preview storage (required for download + optional IG publish URL)
         db.update_ig_job(sb, job_id, status="editing")
-        preview_url = upload_preview(
+        stored = upload_preview(
             sb, user_id=user_id, job_id=f"ig_{job_id}", video_path=out_video
         )
-        db.update_ig_job(sb, job_id, preview_url=preview_url)
+        preview_url = stored.public_url
+        meta0 = {**meta0, **storage_meta(stored)}
+        db.update_ig_job(
+            sb,
+            job_id,
+            preview_url=preview_url,
+            metadata=meta0,
+        )
         print(f"IG preview: {preview_url}")
 
         dur = int(training_shaped.get("duration_seconds") or 30)

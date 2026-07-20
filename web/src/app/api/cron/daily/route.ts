@@ -4,7 +4,6 @@ import { createServiceClient } from "@/lib/supabase/middleware";
 export const runtime = "nodejs";
 
 function weekdayMon1(d: Date): number {
-  // JS: 0=Sun ... convert to 1=Mon ... 7=Sun
   const day = d.getDay();
   return day === 0 ? 7 : day;
 }
@@ -24,14 +23,43 @@ function todayInTz(timezone: string): { dateStr: string; weekday: number; hhmm: 
   );
   const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
   const hhmm = `${parts.hour}:${parts.minute}`;
-  const weekday = weekdayMon1(
-    new Date(`${dateStr}T${hhmm}:00`),
-  );
+  const weekday = weekdayMon1(new Date(`${dateStr}T${hhmm}:00`));
   return { dateStr, weekday, hhmm };
 }
 
+function normalizeTimes(times: string[]): string[] {
+  return times
+    .map((t) => {
+      const [h, m] = String(t).trim().split(":");
+      if (h == null) return "";
+      return `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
+    })
+    .filter(Boolean);
+}
+
+function dayAllowed(
+  schedule: {
+    mode?: string;
+    weekdays?: number[];
+    custom_dates?: string[];
+  },
+  weekday: number,
+  dateStr: string,
+): boolean {
+  if (schedule.mode === "daily") return true;
+  if (schedule.mode === "weekdays") return weekday >= 1 && weekday <= 5;
+  if (schedule.mode === "custom_days") {
+    return (schedule.weekdays || []).includes(weekday);
+  }
+  if (schedule.mode === "dates") {
+    return (schedule.custom_dates || []).includes(dateStr);
+  }
+  return true;
+}
+
 /**
- * Vercel Cron (hourly): create jobs based on publish_schedules / legacy flags.
+ * Hourly cron: ONE job per matched clock time.
+ * videos_per_day=3 + times [09:00,14:00,20:00] → three separate publishes, not a batch.
  */
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
@@ -66,25 +94,14 @@ export async function GET(request: Request) {
 
     const tz = schedule.timezone || "UTC";
     const { dateStr, weekday, hhmm } = todayInTz(tz);
-    const times: string[] = schedule.times || [];
-    const matchedTime = times.find((t) => {
-      const [h, m] = String(t).split(":");
-      return hhmm === `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
-    });
+    const times = normalizeTimes(schedule.times || []);
+    const perDay = Math.min(10, Math.max(1, Number(schedule.videos_per_day) || 1));
+    const activeTimes = times.slice(0, perDay);
+
+    const matchedTime = activeTimes.find((t) => t === hhmm);
     if (!matchedTime) continue;
+    if (!dayAllowed(schedule, weekday, dateStr)) continue;
 
-    let allowed = false;
-    if (schedule.mode === "daily") allowed = true;
-    if (schedule.mode === "weekdays") allowed = weekday >= 1 && weekday <= 5;
-    if (schedule.mode === "custom_days") {
-      allowed = (schedule.weekdays || []).includes(weekday);
-    }
-    if (schedule.mode === "dates") {
-      allowed = (schedule.custom_dates || []).includes(dateStr);
-    }
-    if (!allowed) continue;
-
-    // Avoid duplicate queue for same slot
     const slotKey = `${dateStr}T${matchedTime}`;
     const { data: existing } = await sb
       .from("video_jobs")
@@ -94,18 +111,21 @@ export async function GET(request: Request) {
       .limit(1);
     if (existing && existing.length) continue;
 
-    const count = schedule.videos_per_day || 1;
-    const rows = Array.from({ length: count }, (_, i) => ({
+    const { error } = await sb.from("video_jobs").insert({
       user_id: schedule.user_id,
-      status: "queued" as const,
-      scheduled_for: new Date(Date.now() + i * 20 * 60 * 1000).toISOString(),
-      metadata: { schedule_slot: slotKey, schedule_time: matchedTime },
-    }));
-    const { error } = await sb.from("video_jobs").insert(rows);
-    if (!error) created += rows.length;
+      youtube_channel_id: schedule.youtube_channel_id || null,
+      status: "queued",
+      scheduled_for: new Date().toISOString(),
+      metadata: {
+        schedule_slot: slotKey,
+        schedule_time: matchedTime,
+        videos_per_day: perDay,
+        youtube_channel_id: schedule.youtube_channel_id || null,
+      },
+    });
+    if (!error) created += 1;
   }
 
-  // Legacy fallback: daily_videos_enabled without schedule row
   const { data: legacy } = await sb
     .from("profiles")
     .select("id, videos_per_day")
@@ -128,11 +148,14 @@ export async function GET(request: Request) {
       .maybeSingle();
     if (!training) continue;
 
-    const count = user.videos_per_day || 2;
+    const count = Math.min(10, Math.max(1, user.videos_per_day || 2));
     const rows = Array.from({ length: count }, (_, i) => ({
       user_id: user.id,
       status: "queued" as const,
-      scheduled_for: new Date(Date.now() + i * 30 * 60 * 1000).toISOString(),
+      scheduled_for: new Date(Date.now() + i * 4 * 60 * 60 * 1000).toISOString(),
+      metadata: {
+        schedule_slot: `legacy-${new Date().toISOString().slice(0, 10)}-${i}`,
+      },
     }));
     const { error } = await sb.from("video_jobs").insert(rows);
     if (!error) created += rows.length;

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function LegacyTrainingRedirect() {
-  redirect("/dashboard/training");
+export default function TrainingLegacyRedirect() {
+  redirect("/dashboard/channel/training");
 }

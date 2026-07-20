@@ -26,8 +26,22 @@ supabase/     SQL схема
 2. SQL Editor → выполни по очереди:
    - `supabase/migrations/001_initial.sql`
    - `supabase/migrations/002_pro_dashboard.sql`
+   - …остальные миграции по номеру…
+   - `supabase/migrations/010_creativity_storage.sql` — bucket `short-previews` для видео Creativity
 3. Authentication → Providers → Email: включи
 4. Скопируй URL, anon key, service_role key
+
+### Storage (Creativity)
+
+Готовые ролики хранятся в Supabase Storage:
+
+| Что | Где |
+|-----|-----|
+| MP4 файл | bucket `short-previews` → `{user_id}/{job_id}.mp4` |
+| Ссылка | `video_jobs.preview_url` + `storage_path` |
+| Просмотр | `/api/jobs/[id]/preview` (signed URL) |
+
+Worker **не** ставит статус `ready`, пока upload в Storage не успешен.
 
 ## 2. API ключи
 

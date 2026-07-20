@@ -13,7 +13,7 @@ type HeygenLook = {
   source: string;
 };
 
-export function InstagramAvatarStudio({
+export function AvatarStudio({
   initial,
 }: {
   initial: {
@@ -28,6 +28,7 @@ export function InstagramAvatarStudio({
   const router = useRouter();
   const [form, setForm] = useState(initial);
   const [looks, setLooks] = useState<HeygenLook[]>([]);
+  const [diagnostics, setDiagnostics] = useState<string[]>([]);
   const [loadingLooks, setLoadingLooks] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -37,14 +38,18 @@ export function InstagramAvatarStudio({
     setLoadingLooks(true);
     setErr(null);
     try {
-      const res = await fetch("/api/instagram/heygen/avatars");
+      const res = await fetch("/api/heygen/avatars");
       const data = await res.json();
+      setDiagnostics(Array.isArray(data.diagnostics) ? data.diagnostics : []);
       if (!res.ok) {
         setErr(data.error || "Could not load HeyGen styles");
         setLooks([]);
         return;
       }
       setLooks(data.avatars || []);
+      if ((data.avatars || []).length === 0 && data.hint) {
+        setErr(data.hint);
+      }
     } catch {
       setErr("Network error loading HeyGen styles");
     } finally {
@@ -76,7 +81,7 @@ export function InstagramAvatarStudio({
     setBusy(true);
     setMsg(null);
     setErr(null);
-    const res = await fetch("/api/instagram/avatar", {
+    const res = await fetch("/api/avatar", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
@@ -87,7 +92,7 @@ export function InstagramAvatarStudio({
       setErr(data.error || "Save failed");
       return;
     }
-    setMsg("Avatar style saved — Content will use this for generation.");
+    setMsg("Avatar style saved — use Creativity or Avatar studio to generate.");
     router.refresh();
   }
 
@@ -97,11 +102,11 @@ export function InstagramAvatarStudio({
     <div className="space-y-6">
       <header className="rise flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Avatar</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[color:var(--muted)]">
-            Your HeyGen character and styles. Pick a look — Instagram Connect is not
-            required. This studio is the HeyGen video generator.
-          </p>
+        <h1 className="text-2xl font-semibold">Avatar</h1>
+        <p className="mt-1 max-w-2xl text-sm text-[color:var(--muted)]">
+          HeyGen talking avatar for your videos. Pick a style, then generate in
+          Pick a HeyGen look, then create videos under Creativity.
+        </p>
         </div>
         <button
           type="button"
@@ -115,6 +120,16 @@ export function InstagramAvatarStudio({
 
       {msg && <p className="text-sm text-[color:var(--success)]">{msg}</p>}
       {err && <p className="text-sm text-[color:var(--danger)]">{err}</p>}
+      {diagnostics.length > 0 && (
+        <details className="text-xs text-[color:var(--muted)]">
+          <summary>HeyGen API diagnostics</summary>
+          <ul className="mt-1 list-disc pl-5">
+            {diagnostics.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {/* Active avatar preview */}
       <section className="panel rise flex flex-wrap items-center gap-5 p-5">

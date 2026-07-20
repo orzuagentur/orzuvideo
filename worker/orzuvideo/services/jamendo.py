@@ -81,13 +81,15 @@ def _fetch_tracks(params: dict) -> list[dict]:
 def search_tracks(mood: str) -> list[dict]:
     """Try several Jamendo query strategies until tracks are found."""
     tags = _mood_tags(mood)
+    # Prefer strong motivational / epic instrumental beds
     strategies = [
+        {"tags": "epic", "vocalinstrumental": "instrumental", "order": "popularity_total"},
+        {"tags": "energetic", "vocalinstrumental": "instrumental", "order": "popularity_total"},
         {"tags": tags[0], "vocalinstrumental": "instrumental", "order": "popularity_total"},
         {"tags": "+".join(tags[:2]), "order": "popularity_total"},
-        {"fuzzytags": tags[0], "order": "popularity_month"},
-        {"tags": "electronic", "vocalinstrumental": "instrumental", "order": "popularity_total"},
+        {"fuzzytags": "motivational", "order": "popularity_month"},
+        {"tags": "soundtrack", "vocalinstrumental": "instrumental", "order": "popularity_total"},
         {"order": "popularity_total", "vocalinstrumental": "instrumental"},
-        {"order": "popularity_total"},
     ]
 
     for params in strategies:
@@ -102,13 +104,22 @@ def search_tracks(mood: str) -> list[dict]:
     return []
 
 
-def _pick_playable(tracks: list[dict]) -> dict | None:
+def _pick_playable(tracks: list[dict], exclude_ids: set[str] | None = None) -> dict | None:
+    ban = exclude_ids or set()
     preferred = [
         t
         for t in tracks
-        if t.get("audiodownload_allowed") and (t.get("audiodownload") or t.get("audio"))
+        if t.get("audiodownload_allowed")
+        and (t.get("audiodownload") or t.get("audio"))
+        and str(t.get("id")) not in ban
     ]
-    pool = preferred or [t for t in tracks if t.get("audio") or t.get("audiodownload")]
+    pool = preferred or [
+        t
+        for t in tracks
+        if (t.get("audio") or t.get("audiodownload")) and str(t.get("id")) not in ban
+    ]
+    if not pool:
+        pool = [t for t in tracks if t.get("audio") or t.get("audiodownload")]
     if not pool:
         return None
     return random.choice(pool)
@@ -196,21 +207,30 @@ def _generate_ambient_bed(dest: Path, seconds: float = 90.0) -> JamendoTrack:
     )
 
 
-def download_background_music(mood: str, dest: Path) -> JamendoTrack:
+def download_background_music(
+    mood: str,
+    dest: Path,
+    *,
+    exclude_ids: set[str] | None = None,
+) -> JamendoTrack:
     """
     Always return a playable music bed.
-    Prefer Jamendo -> local cache -> generated ambient.
+    Prefer strong motivational/epic instrumental; skip previously used track IDs.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     client_id = (settings.jamendo_client_id or "").strip()
     print(f"Music: JAMENDO_CLIENT_ID={'set' if client_id else 'MISSING'}")
 
+    forced = (mood or "").strip() or "motivational epic"
+    if "motivat" not in forced.lower() and "epic" not in forced.lower():
+        forced = f"motivational epic {forced}"
+
     if client_id:
         try:
-            tracks = search_tracks(mood or "cinematic motivational")
+            tracks = search_tracks(forced)
             if not tracks:
-                tracks = search_tracks("epic soundtrack")
-            pick = _pick_playable(tracks)
+                tracks = search_tracks("epic energetic soundtrack")
+            pick = _pick_playable(tracks, exclude_ids)
             if pick:
                 url = pick.get("audiodownload") or pick.get("audio")
                 if not url:
@@ -223,7 +243,7 @@ def download_background_music(mood: str, dest: Path) -> JamendoTrack:
                     dest.write_bytes(r.content)
                 print(
                     f"Jamendo music: {pick.get('name')} by {pick.get('artist_name')} "
-                    f"({len(r.content)} bytes)"
+                    f"({len(r.content)} bytes) id={pick.get('id')}"
                 )
                 track = JamendoTrack(
                     id=str(pick.get("id")),

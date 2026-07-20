@@ -60,17 +60,29 @@ button {
 .field {
   width: 100%;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--fg);
   border-radius: 10px;
   padding: 0.85rem 1rem;
   outline: none;
+  font-size: 0.95rem;
+  line-height: 1.45;
   transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .field:focus {
   border-color: rgba(232, 165, 75, 0.55);
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+select.field {
+  cursor: pointer;
+  color-scheme: dark;
+}
+
+select.field option {
+  background-color: #161616;
+  color: #f3f3f3;
 }
 
 .btn {

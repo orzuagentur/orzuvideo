@@ -8,7 +8,7 @@ import httpx
 from orzuvideo.config import settings
 
 
-def search_videos(query: str, per_page: int = 8) -> list[dict]:
+def search_videos(query: str, per_page: int = 12) -> list[dict]:
     if not settings.pexels_api_key:
         raise RuntimeError("PEXELS_API_KEY is required")
 
@@ -31,7 +31,6 @@ def search_videos(query: str, per_page: int = 8) -> list[dict]:
 
 def _best_file(video: dict) -> str | None:
     files = video.get("video_files") or []
-    # Prefer HD portrait-ish files under ~1080p for speed
     ranked = sorted(
         files,
         key=lambda f: (
@@ -51,22 +50,45 @@ def download_stock_clips(
     queries: list[str],
     dest_dir: Path,
     count: int = 3,
-) -> list[Path]:
+    *,
+    exclude_ids: set[str] | set[int] | None = None,
+) -> tuple[list[Path], list[str]]:
+    """
+    Download unique Pexels clips, skipping IDs already used on prior videos.
+    Returns (paths, used_asset_ids).
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     clips: list[Path] = []
-    seen_ids: set[int] = set()
+    used_ids: list[str] = []
+    seen_ids: set[str] = {str(x) for x in (exclude_ids or set())}
 
     shuffled = list(queries)
     random.shuffle(shuffled)
+    # Extra generic queries if we keep hitting used IDs
+    extras = [
+        "cinematic city night",
+        "athlete training grit",
+        "sunrise mountain hike",
+        "ocean waves drone",
+        "neon street walking",
+        "coffee shop creator",
+        "storm clouds timelapse",
+        "desert road driving",
+    ]
+    search_list = shuffled + [e for e in extras if e not in shuffled]
 
-    for query in shuffled:
+    for query in search_list:
         if len(clips) >= count:
             break
-        videos = search_videos(query)
+        try:
+            videos = search_videos(query, per_page=15)
+        except Exception as exc:
+            print(f"Pexels search failed ({query}): {exc}")
+            continue
         random.shuffle(videos)
         for video in videos:
-            vid = video.get("id")
-            if vid in seen_ids:
+            vid = str(video.get("id") or "")
+            if not vid or vid in seen_ids:
                 continue
             link = _best_file(video)
             if not link:
@@ -78,9 +100,11 @@ def download_stock_clips(
                 r.raise_for_status()
                 path.write_bytes(r.content)
             clips.append(path)
+            used_ids.append(vid)
+            print(f"Pexels clip {vid} for query={query!r}")
             if len(clips) >= count:
                 break
 
     if not clips:
-        raise RuntimeError(f"No Pexels clips found for queries: {queries}")
-    return clips
+        raise RuntimeError(f"No fresh Pexels clips for queries: {queries}")
+    return clips, used_ids

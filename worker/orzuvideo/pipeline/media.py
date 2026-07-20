@@ -135,21 +135,26 @@ def write_ass_subtitles(
     *,
     emphasis: list[str] | None = None,
     hook_text: str | None = None,
+    play_res: tuple[int, int] | None = None,
 ) -> Path:
     """Professional karaoke ASS + optional 3-second hook headline."""
     emphasis_set = {e.upper().strip(".,!") for e in (emphasis or [])}
-    header = """[Script Info]
+    play_w, play_h = play_res or (1080, 1920)
+    # Keep captions in the lower third relative to frame height
+    margin_v = max(80, int(play_h * 0.27))
+    hook_margin_v = max(120, int(play_h * 0.4))
+    header = f"""[Script Info]
 ScriptType: v4.00+
-PlayResX: 1080
-PlayResY: 1920
+PlayResX: {play_w}
+PlayResY: {play_h}
 WrapStyle: 0
 ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,78,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,520,1
-Style: Emphasis,Arial Black,86,&H0000E5FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,0,2,60,60,520,1
-Style: Hook,Arial Black,92,&H0000E5FF,&H000000FF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,1,8,0,2,50,50,780,1
+Style: Default,Arial Black,78,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,{margin_v},1
+Style: Emphasis,Arial Black,86,&H0000E5FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,0,2,60,60,{margin_v},1
+Style: Hook,Arial Black,92,&H0000E5FF,&H000000FF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,1,8,0,2,50,50,{hook_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

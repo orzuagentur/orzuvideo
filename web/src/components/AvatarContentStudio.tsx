@@ -3,13 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-type IgJob = {
+type AvatarJob = {
   id: string;
   status: string;
   title: string | null;
   caption: string | null;
   preview_url: string | null;
-  instagram_permalink: string | null;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
@@ -35,21 +34,19 @@ type HeygenLook = {
 
 const LABEL: Record<string, string> = {
   queued: "Queued",
-  generating_script: "ChatGPT script…",
-  generating_voice: "ElevenLabs voice…",
-  generating_avatar: "HeyGen avatar…",
-  editing: "Saving preview…",
-  uploading: "Uploading…",
-  ready: "Ready — download",
-  published: "Published",
+  generating_script: "ChatGPT script...",
+  generating_voice: "ElevenLabs voice...",
+  generating_avatar: "HeyGen avatar...",
+  editing: "Saving preview...",
+  ready: "Ready - download",
   failed: "Failed",
 };
 
-export function InstagramContentStudio({
+export function AvatarContentStudio({
   jobs,
   defaults,
 }: {
-  jobs: IgJob[];
+  jobs: AvatarJob[];
   defaults: Defaults;
 }) {
   const router = useRouter();
@@ -69,7 +66,7 @@ export function InstagramContentStudio({
   const [cta, setCta] = useState(defaults.cta || "");
 
   useEffect(() => {
-    void fetch("/api/instagram/heygen/avatars")
+    void fetch("/api/heygen/avatars")
       .then((r) => r.json())
       .then((d) => {
         if (Array.isArray(d.avatars)) setLooks(d.avatars);
@@ -95,12 +92,11 @@ export function InstagramContentStudio({
     }
     setBusy("create");
     setMsg(null);
-    const res = await fetch("/api/instagram/jobs", {
+    const res = await fetch("/api/avatar/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         brief: text,
-        publish: false,
         duration_seconds: duration,
         language,
         tone,
@@ -119,24 +115,7 @@ export function InstagramContentStudio({
     }
     setBrief("");
     setShowCreate(false);
-    setMsg("Generating… ChatGPT → ElevenLabs → HeyGen. Download when Ready.");
-    router.refresh();
-  }
-
-  async function publishDraft(id: string) {
-    if (!confirm("Publish this video to Instagram? (optional — you can just Download)")) {
-      return;
-    }
-    setBusy(id);
-    setMsg(null);
-    const res = await fetch(`/api/instagram/jobs/${id}/publish`, { method: "POST" });
-    const data = await res.json();
-    setBusy(null);
-    if (!res.ok) {
-      setMsg(data.error || "Publish failed");
-      return;
-    }
-    setMsg("Publish queued.");
+    setMsg("Generating: ChatGPT -> ElevenLabs -> HeyGen. Download when Ready.");
     router.refresh();
   }
 
@@ -144,16 +123,14 @@ export function InstagramContentStudio({
     <div className="space-y-6">
       <header className="rise flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Content</h1>
+          <h2 className="text-xl font-semibold">Generate avatar video</h2>
           <p className="mt-1 max-w-xl text-sm text-[color:var(--muted)]">
-            Full HeyGen video studio — GPT script, ElevenLabs voice, avatar styles.
-            Generate → preview → <strong>Download</strong>. Instagram Connect is optional.
+            GPT script + ElevenLabs voice + HeyGen avatar. Preview and download MP4.
           </p>
         </div>
         <button
           type="button"
           className="btn btn-primary h-11 w-11 rounded-full text-2xl leading-none"
-          style={{ background: "linear-gradient(135deg,#e1306c,#c13584)" }}
           onClick={() => setShowCreate(true)}
           aria-label="Create video"
         >
@@ -161,16 +138,12 @@ export function InstagramContentStudio({
         </button>
       </header>
 
-      {msg && (
-        <p className="text-sm" style={{ color: "#e1306c" }}>
-          {msg}
-        </p>
-      )}
+      {msg && <p className="text-sm text-[color:var(--accent)]">{msg}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {sorted.length === 0 && (
           <p className="panel col-span-full p-8 text-center text-sm text-[color:var(--muted)]">
-            No videos yet. Tap + to generate a Reel (no Instagram login needed).
+            No avatar videos yet. Tap + to generate.
           </p>
         )}
         {sorted.map((job) => (
@@ -198,41 +171,19 @@ export function InstagramContentStudio({
               </p>
               <p className="text-xs text-[color:var(--muted)]">
                 {LABEL[job.status] || job.status}
-                {job.error_message ? ` · ${job.error_message.slice(0, 100)}` : ""}
+                {job.error_message ? ` - ${job.error_message.slice(0, 100)}` : ""}
               </p>
-              <div className="flex flex-wrap gap-2">
-                {job.preview_url && (
-                  <a
-                    href={job.preview_url}
-                    download={`${(job.title || "reel").slice(0, 40)}.mp4`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-primary text-xs"
-                  >
-                    Download
-                  </a>
-                )}
-                {(job.status === "ready" || job.preview_url) && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost text-xs"
-                    disabled={busy === job.id || job.status === "published"}
-                    onClick={() => void publishDraft(job.id)}
-                  >
-                    Publish to IG
-                  </button>
-                )}
-                {job.instagram_permalink && (
-                  <a
-                    href={job.instagram_permalink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-ghost text-xs"
-                  >
-                    Open IG
-                  </a>
-                )}
-              </div>
+              {job.preview_url && (
+                <a
+                  href={job.preview_url}
+                  download={`${(job.title || "avatar").slice(0, 40)}.mp4`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary text-xs"
+                >
+                  Download
+                </a>
+              )}
             </div>
           </article>
         ))}
@@ -249,33 +200,25 @@ export function InstagramContentStudio({
             onClick={(e) => e.stopPropagation()}
             role="dialog"
           >
-            <h2 className="text-lg font-semibold">Generate video</h2>
-            <p className="text-sm text-[color:var(--muted)]">
-              Pipeline: ChatGPT script → ElevenLabs TTS → HeyGen avatar. You download the
-              MP4. Publish to Instagram is optional later.
-            </p>
-
+            <h2 className="text-lg font-semibold">Generate avatar video</h2>
             <label className="block space-y-1.5 text-sm">
               <span className="text-[color:var(--muted)]">Brief / prompt</span>
               <textarea
                 className="field min-h-[120px]"
                 value={brief}
                 onChange={(e) => setBrief(e.target.value)}
-                placeholder="Topic, hook, CTA… e.g. 30s Reel: 3 morning habits, energetic, ask to follow."
+                placeholder="Topic, hook, CTA..."
                 autoFocus
               />
             </label>
-
             <label className="block space-y-1.5 text-sm">
               <span className="text-[color:var(--muted)]">Style prompt (GPT)</span>
               <textarea
                 className="field min-h-[72px]"
                 value={stylePrompt}
                 onChange={(e) => setStylePrompt(e.target.value)}
-                placeholder="How the avatar should speak / brand voice"
               />
             </label>
-
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block space-y-1.5 text-sm">
                 <span className="text-[color:var(--muted)]">Duration (sec)</span>
@@ -329,7 +272,6 @@ export function InstagramContentStudio({
                 />
               </label>
             </div>
-
             <label className="block space-y-1.5 text-sm">
               <span className="text-[color:var(--muted)]">HeyGen style</span>
               {looks.length > 0 ? (
@@ -338,7 +280,7 @@ export function InstagramContentStudio({
                   value={avatarId}
                   onChange={(e) => setAvatarId(e.target.value)}
                 >
-                  {!avatarId && <option value="">Select style…</option>}
+                  {!avatarId && <option value="">Select style...</option>}
                   {looks.map((l) => (
                     <option key={l.id} value={l.id}>
                       {l.name}
@@ -354,7 +296,6 @@ export function InstagramContentStudio({
                 />
               )}
             </label>
-
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
@@ -369,7 +310,7 @@ export function InstagramContentStudio({
                 disabled={busy === "create"}
                 onClick={() => void createVideo()}
               >
-                {busy === "create" ? "Queuing…" : "Generate video"}
+                {busy === "create" ? "Queuing..." : "Generate video"}
               </button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getActiveYoutubeChannel } from "@/lib/youtube-channels";
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -8,9 +9,18 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const active = await getActiveYoutubeChannel(user.id);
+  if (!active?.channel_id) {
+    return NextResponse.json(
+      { error: "Select an active YouTube channel first" },
+      { status: 400 },
+    );
+  }
+
   const body = await request.json();
   const payload = {
     user_id: user.id,
+    youtube_channel_id: active.channel_id,
     niche: String(body.niche || "").trim(),
     content_type: String(body.content_type || "").trim(),
     style_prompt: String(body.style_prompt || "").trim(),
@@ -41,10 +51,26 @@ export async function POST(request: Request) {
     );
   }
 
-  const { error } = await supabase.from("ai_training").upsert(payload, {
-    onConflict: "user_id",
-  });
+  const { data: existing } = await supabase
+    .from("ai_training")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("youtube_channel_id", active.channel_id)
+    .maybeSingle();
+
+  let error;
+  if (existing?.id) {
+    ({ error } = await supabase
+      .from("ai_training")
+      .update(payload)
+      .eq("id", existing.id));
+  } else {
+    ({ error } = await supabase.from("ai_training").insert(payload));
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    youtube_channel_id: active.channel_id,
+  });
 }

@@ -27,6 +27,9 @@ def mix_audio(
     out: Path,
     *,
     voice_duration: float,
+    music_volume_hook: float = 0.88,
+    music_volume_body: float = 0.58,
+    voice_volume: float = 1.05,
 ) -> Path:
     if music is None or not music.exists():
         run_ffmpeg(
@@ -45,16 +48,20 @@ def mix_audio(
         return out
 
     fade_out_at = max(0.5, voice_duration - 1.4)
+    # Stronger motivational bed — louder under hook + body
+    hook_v = max(0.3, min(1.2, float(music_volume_hook)))
+    body_v = max(0.2, min(1.0, float(music_volume_body)))
+    vox_v = max(0.7, min(1.4, float(voice_volume)))
     filter_complex = (
         f"[1:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,"
-        f"loudnorm=I=-16:TP=-1.5:LRA=11,"
-        f"volume='if(lt(t,2.8),0.72,0.42)':eval=frame,"
+        f"loudnorm=I=-15:TP=-1.5:LRA=11,"
+        f"volume='if(lt(t,2.8),{hook_v:.2f},{body_v:.2f})':eval=frame,"
         f"afade=t=in:st=0:d=0.15,"
         f"afade=t=out:st={fade_out_at:.3f}:d=1.3[bg];"
         f"[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,"
-        f"loudnorm=I=-14:TP=-1.5:LRA=11,volume=1.05[vox];"
+        f"loudnorm=I=-14:TP=-1.5:LRA=11,volume={vox_v:.2f}[vox];"
         f"[vox][bg]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,"
-        f"loudnorm=I=-13:TP=-1.2:LRA=11[aout]"
+        f"loudnorm=I=-12:TP=-1.2:LRA=11[aout]"
     )
     run_ffmpeg(
         [
@@ -89,12 +96,14 @@ def burn_subtitles_and_mux(
     emphasis: list[str] | None = None,
     hook_text: str | None = None,
     work_dir: Path,
+    size: tuple[int, int] | None = None,
 ) -> Path:
     ass = write_ass_subtitles(
         words,
         work_dir / "subs.ass",
         emphasis=emphasis,
         hook_text=hook_text,
+        play_res=size,
     )
     ass_esc = _escape_ass_path(ass)
 
@@ -147,10 +156,15 @@ def build_short(
     output_path: Path,
     emphasis: list[str] | None = None,
     hook_text: str | None = None,
+    music_volume_hook: float = 0.88,
+    music_volume_body: float = 0.58,
+    voice_volume: float = 1.05,
+    size: tuple[int, int] | None = None,
 ) -> Path:
     """Pro Shorts assembly: punch open, motion library, cinematic transitions."""
     work_dir.mkdir(parents=True, exist_ok=True)
     voice_dur = ffprobe_duration(voice_path)
+    frame = size or (settings.output_width, settings.output_height)
 
     n = max(1, len(clips))
     overlap = 0.55 if n > 1 else 0.0
@@ -174,7 +188,7 @@ def build_short(
                 tries += 1
             used_motions.add(motion["id"])
         print(f"Clip {i} motion: {motion['id']} ({dur:.2f}s)")
-        normalize_clip_pro(clip, dst, dur, punch=punch, motion=motion)
+        normalize_clip_pro(clip, dst, dur, punch=punch, motion=motion, size=frame)
         normalized.append(dst)
 
     timeline = work_dir / "timeline.mp4"
@@ -203,7 +217,15 @@ def build_short(
         timeline = padded
 
     mixed = work_dir / "mixed.m4a"
-    mix_audio(voice_path, music_path, mixed, voice_duration=voice_dur)
+    mix_audio(
+        voice_path,
+        music_path,
+        mixed,
+        voice_duration=voice_dur,
+        music_volume_hook=music_volume_hook,
+        music_volume_body=music_volume_body,
+        voice_volume=voice_volume,
+    )
 
     return burn_subtitles_and_mux(
         timeline,
@@ -213,4 +235,5 @@ def build_short(
         emphasis=emphasis,
         hook_text=hook_text,
         work_dir=work_dir,
+        size=frame,
     )

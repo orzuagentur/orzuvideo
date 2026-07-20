@@ -13,7 +13,7 @@ export async function POST() {
     const { accessToken, supabase: sb } = await getFreshYoutubeAccessToken(user.id);
 
     const chRes = await fetch(
-      "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true",
+      "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,brandingSettings&mine=true",
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
     const ch = await chRes.json();
@@ -76,7 +76,12 @@ export async function POST() {
       }
     }
 
-    return NextResponse.json({ ok: true });
+    const bannerUrl =
+      item.brandingSettings?.image?.bannerExternalUrl ||
+      item.brandingSettings?.image?.bannerImageUrl ||
+      null;
+
+    return NextResponse.json({ ok: true, bannerUrl });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Sync failed" },

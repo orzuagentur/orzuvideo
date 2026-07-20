@@ -1,214 +1,250 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getFreshYoutubeAccessToken } from "@/lib/youtube";
+import {
+  listYoutubeChannels,
+  setActiveYoutubeChannel,
+} from "@/lib/youtube-channels";
 
 export type YtChannel = {
   id: string;
   title: string;
   thumbnail: string | null;
   customUrl: string | null;
+  subscriberCount?: number;
+  viewCount?: number;
+  videoCount?: number;
 };
 
-async function refreshAccessToken(refreshToken: string) {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.YOUTUBE_CLIENT_ID!,
-      client_secret: process.env.YOUTUBE_CLIENT_SECRET!,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error_description || data.error || "Token refresh failed");
-  }
-  return data as { access_token: string; expires_in?: number };
-}
-
-async function fetchChannels(accessToken: string): Promise<YtChannel[]> {
-  const res = await fetch(
-    "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=50",
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  );
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error?.message || "Failed to load YouTube channels");
-  }
-
-  return (data.items || []).map(
-    (item: {
-      id: string;
-      snippet?: {
-        title?: string;
-        customUrl?: string;
-        thumbnails?: { default?: { url?: string } };
-      };
-    }) => ({
-      id: item.id,
-      title: item.snippet?.title || "Untitled channel",
-      thumbnail: item.snippet?.thumbnails?.default?.url || null,
-      customUrl: item.snippet?.customUrl || null,
-    }),
-  );
-}
-
-async function getAccessTokenForUser(userId: string) {
-  const supabase = await createClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      "youtube_access_token, youtube_refresh_token, youtube_token_expires_at, youtube_channel_id",
-    )
-    .eq("id", userId)
-    .single();
-
-  if (!profile?.youtube_access_token && !profile?.youtube_refresh_token) {
-    return { error: "Connect YouTube first", status: 400 as const };
-  }
-
-  let accessToken = profile.youtube_access_token as string | null;
-  const expiresAt = profile.youtube_token_expires_at
-    ? new Date(profile.youtube_token_expires_at).getTime()
-    : 0;
-  const needsRefresh =
-    !accessToken || !expiresAt || expiresAt < Date.now() + 60_000;
-
-  if (needsRefresh && profile.youtube_refresh_token) {
-    try {
-      const refreshed = await refreshAccessToken(profile.youtube_refresh_token);
-      accessToken = refreshed.access_token;
-      await supabase
-        .from("profiles")
-        .update({
-          youtube_access_token: refreshed.access_token,
-          youtube_token_expires_at: refreshed.expires_in
-            ? new Date(Date.now() + refreshed.expires_in * 1000).toISOString()
-            : null,
-        })
-        .eq("id", userId);
-    } catch (e) {
-      return {
-        error:
-          e instanceof Error
-            ? e.message
-            : "YouTube session expired. Reconnect.",
-        status: 401 as const,
-      };
-    }
-  }
-
-  if (!accessToken) {
-    return {
-      error: "YouTube session expired. Reconnect.",
-      status: 401 as const,
-    };
-  }
-
+function mapItem(item: {
+  id: string;
+  snippet?: {
+    title?: string;
+    customUrl?: string;
+    thumbnails?: { default?: { url?: string }; medium?: { url?: string } };
+  };
+  statistics?: {
+    subscriberCount?: string;
+    viewCount?: string;
+    videoCount?: string;
+  };
+}): YtChannel {
   return {
-    accessToken,
-    selectedChannelId: profile.youtube_channel_id as string | null,
+    id: item.id,
+    title: item.snippet?.title || "Untitled channel",
+    thumbnail:
+      item.snippet?.thumbnails?.medium?.url ||
+      item.snippet?.thumbnails?.default?.url ||
+      null,
+    customUrl: item.snippet?.customUrl || null,
+    subscriberCount: Number(item.statistics?.subscriberCount || 0),
+    viewCount: Number(item.statistics?.viewCount || 0),
+    videoCount: Number(item.statistics?.videoCount || 0),
   };
 }
 
+async function fetchGoogleChannels(accessToken: string): Promise<{
+  channels: YtChannel[];
+  diagnostics: string[];
+}> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const diagnostics: string[] = [];
+  const byId = new Map<string, YtChannel>();
+
+  const urls: { label: string; url: string }[] = [
+    {
+      label: "mine",
+      url: "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true&maxResults=50",
+    },
+    {
+      label: "managedByMe",
+      url: "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&managedByMe=true&maxResults=50",
+    },
+  ];
+
+  for (const { label, url } of urls) {
+    try {
+      const res = await fetch(url, { headers, cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) {
+        diagnostics.push(
+          `${label}: ${data.error?.message || res.statusText || res.status}`,
+        );
+        continue;
+      }
+      const count = (data.items || []).length;
+      diagnostics.push(`${label}: ${count} channel(s)`);
+      for (const item of data.items || []) {
+        if (!item?.id || byId.has(item.id)) continue;
+        byId.set(item.id, mapItem(item));
+      }
+    } catch (e) {
+      diagnostics.push(
+        `${label}: ${e instanceof Error ? e.message : "request failed"}`,
+      );
+    }
+  }
+
+  return { channels: Array.from(byId.values()), diagnostics };
+}
+
+/** List saved channels + Google account channels available to add. */
 export async function GET() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const tokenResult = await getAccessTokenForUser(user.id);
-  if ("error" in tokenResult && tokenResult.error) {
-    return NextResponse.json(
-      { error: tokenResult.error },
-      { status: tokenResult.status },
-    );
-  }
+  const saved = await listYoutubeChannels(user.id);
+  const active = saved.find((c) => c.is_active) || null;
+
+  let available: YtChannel[] = [];
+  let googleError: string | null = null;
+  let diagnostics: string[] = [];
 
   try {
-    const channels = await fetchChannels(
-      (tokenResult as { accessToken: string }).accessToken,
-    );
-    return NextResponse.json({
-      channels,
-      selectedChannelId: (tokenResult as { selectedChannelId: string | null })
-        .selectedChannelId,
-    });
+    const { accessToken } = await getFreshYoutubeAccessToken(user.id);
+    const result = await fetchGoogleChannels(accessToken);
+    available = result.channels;
+    diagnostics = result.diagnostics;
+    if (available.length === 0 && diagnostics.length) {
+      googleError =
+        "No channels returned for this Google token. Try Refresh, or create a channel on YouTube.";
+    }
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Failed to load channels" },
-      { status: 500 },
-    );
+    googleError = e instanceof Error ? e.message : "Connect YouTube first";
   }
+
+  return NextResponse.json({
+    saved,
+    available,
+    selectedChannelId: active?.channel_id || null,
+    googleError,
+    diagnostics,
+  });
 }
 
+/**
+ * body.action:
+ *  - "select" | default: set active among saved (or add+activate from Google list)
+ *  - "add": upsert channel from Google list into youtube_channels
+ *  - "switch": alias of select among saved
+ */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
+  const action = String(body.action || "select");
   const channelId = String(body.channelId || "").trim();
-  const channelTitle = String(body.channelTitle || "").trim();
-
   if (!channelId) {
     return NextResponse.json({ error: "channelId required" }, { status: 400 });
   }
 
-  const tokenResult = await getAccessTokenForUser(user.id);
-  if ("error" in tokenResult && tokenResult.error) {
-    return NextResponse.json(
-      { error: tokenResult.error },
-      { status: tokenResult.status },
-    );
-  }
-
-  let channels: YtChannel[];
   try {
-    channels = await fetchChannels(
-      (tokenResult as { accessToken: string }).accessToken,
+    if (action === "switch") {
+      await setActiveYoutubeChannel(user.id, channelId);
+      return NextResponse.json({ ok: true, channelId });
+    }
+
+    const { accessToken } = await getFreshYoutubeAccessToken(user.id);
+    const { channels: available } = await fetchGoogleChannels(accessToken);
+    let match = available.find((c) => c.id === channelId);
+
+    // Fallback: fetch this channel id directly (token may still read it)
+    if (!match) {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${encodeURIComponent(channelId)}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
+        },
+      );
+      const data = await res.json();
+      if (res.ok && data.items?.[0]) {
+        match = mapItem(data.items[0]);
+      }
+    }
+
+    if (!match) {
+      const saved = await listYoutubeChannels(user.id);
+      if (saved.some((c) => c.channel_id === channelId)) {
+        await setActiveYoutubeChannel(user.id, channelId);
+        return NextResponse.json({ ok: true, channelId });
+      }
+      return NextResponse.json(
+        {
+          error:
+            "Channel not found on this Google account. Open Add channel and Refresh.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select(
+        "youtube_access_token, youtube_refresh_token, youtube_token_expires_at",
+      )
+      .eq("id", user.id)
+      .single();
+
+    await supabase
+      .from("youtube_channels")
+      .update({ is_active: false })
+      .eq("user_id", user.id);
+
+    const { error: upsertErr } = await supabase.from("youtube_channels").upsert(
+      {
+        user_id: user.id,
+        channel_id: match.id,
+        title: match.title,
+        custom_url: match.customUrl,
+        thumbnail_url: match.thumbnail,
+        subscriber_count: match.subscriberCount || 0,
+        view_count: match.viewCount || 0,
+        video_count: match.videoCount || 0,
+        stats_synced_at: new Date().toISOString(),
+        access_token: profile?.youtube_access_token || null,
+        refresh_token: profile?.youtube_refresh_token || null,
+        token_expires_at: profile?.youtube_token_expires_at || null,
+        is_active: true,
+      },
+      { onConflict: "user_id,channel_id" },
     );
+
+    if (upsertErr) {
+      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+    }
+
+    await supabase
+      .from("profiles")
+      .update({
+        youtube_connected: true,
+        youtube_channel_id: match.id,
+        youtube_channel_title: match.title,
+        youtube_custom_url: match.customUrl,
+        youtube_thumbnail_url: match.thumbnail,
+        youtube_subscriber_count: match.subscriberCount || 0,
+        youtube_view_count: match.viewCount || 0,
+        youtube_video_count: match.videoCount || 0,
+        youtube_stats_synced_at: new Date().toISOString(),
+      })
+      .eq("id", user.id);
+
+    return NextResponse.json({
+      ok: true,
+      channelId: match.id,
+      channelTitle: match.title,
+    });
   } catch (e) {
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Failed to load channels" },
+      { error: e instanceof Error ? e.message : "Failed" },
       { status: 500 },
     );
   }
-
-  const match = channels.find((c) => c.id === channelId);
-  if (!match) {
-    return NextResponse.json(
-      {
-        error:
-          "This channel is not available for the connected Google account. Reconnect and pick the right Brand Account in Google.",
-      },
-      { status: 400 },
-    );
-  }
-
-  const { error } = await supabase
-    .from("profiles")
-    .update({
-      youtube_connected: true,
-      youtube_channel_id: match.id,
-      youtube_channel_title: channelTitle || match.title,
-    })
-    .eq("id", user.id);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    ok: true,
-    channelId: match.id,
-    channelTitle: channelTitle || match.title,
-  });
 }

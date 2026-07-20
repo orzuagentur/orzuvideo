@@ -113,9 +113,11 @@ def normalize_clip_pro(
     *,
     punch: bool = False,
     motion: dict[str, str] | None = None,
+    size: tuple[int, int] | None = None,
 ) -> Path:
-    """Vertical normalize with cinematic motion + grade."""
-    w, h, fps = settings.output_width, settings.output_height, settings.fps
+    """Normalize clip to target frame with cinematic motion + grade."""
+    w, h = size or (settings.output_width, settings.output_height)
+    fps = settings.fps
     motion = motion or pick_motion(punch=punch)
     zoom = (
         f"zoompan=z='{motion['zoom']}':d=1:"

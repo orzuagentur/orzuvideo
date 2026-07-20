@@ -59,6 +59,17 @@ export type VideoJob = {
   like_count?: number | null;
   comment_count?: number | null;
   duration_seconds?: number | null;
+  storage_path?: string | null;
+  storage_bucket?: string | null;
+  metadata?: {
+    publish?: boolean;
+    source?: string;
+    user_brief?: string;
+    duration_seconds?: number | null;
+    duration_auto?: boolean;
+    aspect_ratio?: string;
+    [key: string]: unknown;
+  } | null;
 };
 
 export type PublishSchedule = {
