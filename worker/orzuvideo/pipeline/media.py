@@ -35,11 +35,78 @@ def ffprobe_duration(path: Path) -> float:
     return float(data["format"]["duration"])
 
 
+def has_audio_stream(path: Path) -> bool:
+    """True if the media file has at least one audio stream."""
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "csv=p=0",
+        str(path),
+    ]
+    try:
+        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT).strip()
+        return bool(out)
+    except Exception:
+        return False
+
+
+def make_silent_audio(
+    out: Path,
+    duration: float,
+    *,
+    sample_rate: int = 44100,
+) -> Path:
+    """Generate a silent AAC bed (for video-only sources)."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run_ffmpeg(
+        [
+            "-f",
+            "lavfi",
+            "-i",
+            f"anullsrc=r={sample_rate}:cl=stereo",
+            "-t",
+            f"{max(0.1, float(duration)):.3f}",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            str(out),
+        ]
+    )
+    return out
+
+
+def _ffmpeg_error_tip(stderr: str, stdout: str) -> str:
+    """Drop the huge configure banner; keep the real failure lines."""
+    blob = (stderr or "") + "\n" + (stdout or "")
+    lines = [ln.strip() for ln in blob.splitlines() if ln.strip()]
+    useful: list[str] = []
+    for ln in lines:
+        low = ln.lower()
+        if low.startswith("configuration:"):
+            continue
+        if " --enable-" in ln and ln.count("--enable-") >= 3:
+            continue
+        if low.startswith("libav") or low.startswith("built with"):
+            continue
+        useful.append(ln)
+    picked = useful[-16:] if useful else lines[-8:]
+    return "\n".join(picked) if picked else "(no ffmpeg stderr)"
+
+
 def run_ffmpeg(args: list[str]) -> None:
-    cmd = ["ffmpeg", "-y", *args]
+    # hide_banner + error loglevel → short, readable failures (not the configure dump)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed:\n{proc.stderr[-2000:]}")
+        tip = _ffmpeg_error_tip(proc.stderr or "", proc.stdout or "")
+        raise RuntimeError(f"ffmpeg failed (code {proc.returncode}):\n{tip}")
 
 
 def synthesize_with_timestamps(

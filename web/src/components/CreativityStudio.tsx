@@ -30,9 +30,16 @@ type Aspect = (typeof ASPECTS)[number]["id"];
 type DurationId = (typeof DURATIONS)[number]["id"];
 
 function isCreativityJob(job: VideoJob) {
-  const src = job.metadata?.source;
-  if (src === "creativity") return true;
-  if (!job.youtube_video_id && job.metadata?.publish === false) return true;
+  const src = String(job.metadata?.source || "").toLowerCase();
+  const pipe = String(job.metadata?.pipeline || "").toLowerCase();
+  if (src === "reedit" || pipe === "reedit") {
+    return String(job.metadata?.library || "creativity") !== "clipping";
+  }
+  if (src === "creativity" || pipe === "creativity") return true;
+  if (!job.youtube_video_id && job.metadata?.publish === false) {
+    if (src === "ai_clipping" || pipe === "ai_clipping") return false;
+    return true;
+  }
   return false;
 }
 
@@ -43,12 +50,6 @@ function aspectOf(job: VideoJob): string {
 function titleOf(job: VideoJob): string {
   if (job.title?.trim()) return job.title.trim();
   return "Generating title…";
-}
-
-function promptOf(job: VideoJob): string | null {
-  const b = job.metadata?.user_brief;
-  if (typeof b === "string" && b.trim()) return b.trim();
-  return null;
 }
 
 function durationLabel(job: VideoJob): string {
@@ -148,6 +149,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   const [creating, setCreating] = useState(false);
   const { show: toast, notice } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"create" | "library">("create");
 
   const activeJobs = useMemo(
     () => jobs.filter((j) => QUEUE_STATUSES.has(j.status)),
@@ -225,7 +227,8 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
       return;
     }
     setPrompt("");
-    toast("Generation started - the video will appear in your library.", "info");
+    toast("Generation started", "info");
+    setTab("library");
     await refreshJobs();
   }
 
@@ -244,288 +247,284 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   }
 
   return (
-    <div className="relative flex min-h-[calc(100vh-2rem)] flex-col gap-8 pb-28">
+    <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-8 pb-28">
       {notice}
-      <header className="rise space-y-1">
+      <header className="rise space-y-4">
         <h1
-          className="font-[family-name:var(--font-syne)] text-3xl tracking-tight"
+          className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
           style={{ fontWeight: 800 }}
         >
           Creativity
         </h1>
-        <p className="max-w-xl text-sm text-[color:var(--muted)]">
-          Create a video from a prompt - language is detected automatically, AI
-          invents the title. Not linked to YouTube or AI Training.
-        </p>
-      </header>
-
-      {/* Prompt composer with inline format / duration chips */}
-      <section className="rise space-y-3">
-        <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
-          Prompt
-        </label>
-        <div
-          className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] focus-within:border-[color:rgba(232,165,75,0.45)]"
+        <nav
+          className="flex gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
+          aria-label="Creativity sections"
         >
-          <textarea
-            className="min-h-[140px] w-full resize-y border-0 bg-transparent px-4 pt-4 pb-2 text-base leading-relaxed outline-none placeholder:text-[color:var(--muted)]"
-            placeholder="Describe the video you want — topic, mood, scenes, voice…"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            disabled={creating}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void createVideo();
-              }
-            }}
-          />
-          <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--line)] px-3 py-2.5">
-            <PromptChip
-              label="Format"
-              value={aspectChipLabel}
-              open={openChip === "format"}
-              onOpenChange={(open) => setOpenChip(open ? "format" : null)}
-            >
-              {ASPECTS.map((a) => {
-                const on = aspect === a.id;
-                return (
-                  <button
-                    key={a.id}
-                    type="button"
-                    role="option"
-                    aria-selected={on}
-                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/5"
-                    style={{ color: on ? "var(--accent)" : "var(--fg)" }}
-                    onClick={() => {
-                      setAspect(a.id);
-                      setOpenChip(null);
-                    }}
-                  >
-                    <span className="font-semibold">{a.label}</span>
-                    <span className="text-xs text-[color:var(--muted)]">{a.hint}</span>
-                  </button>
-                );
-              })}
-            </PromptChip>
-
-            <PromptChip
-              label="Time"
-              value={durationChipLabel}
-              open={openChip === "duration"}
-              onOpenChange={(open) => setOpenChip(open ? "duration" : null)}
-            >
-              {DURATIONS.map((d) => {
-                const on = durationId === d.id;
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    role="option"
-                    aria-selected={on}
-                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/5"
-                    style={{ color: on ? "var(--accent)" : "var(--fg)" }}
-                    onClick={() => {
-                      setDurationId(d.id);
-                      setOpenChip(null);
-                    }}
-                  >
-                    <span className="font-semibold">{d.label}</span>
-                    {d.id === "auto" && (
-                      <span className="text-[10px] text-[color:var(--muted)]">
-                        AI picks
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </PromptChip>
-
-            <div className="ml-auto">
-              <button
-                type="button"
-                className="btn btn-primary px-5 text-sm"
-                disabled={creating || prompt.trim().length < 8}
-                onClick={() => void createVideo()}
-              >
-                {creating ? "Starting…" : "Generate"}
-              </button>
-            </div>
-          </div>
-        </div>
-        <p className="text-xs text-[color:var(--muted)]">
-          Auto time lets AI choose length from your prompt · ⌘/Ctrl + Enter
-        </p>
-      </section>
-
-      {/* Library */}
-      <section className="space-y-4">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <h2
-              className="font-[family-name:var(--font-syne)] text-xl"
-              style={{ fontWeight: 700 }}
-            >
-              My creations
-            </h2>
-            <p className="mt-0.5 text-sm text-[color:var(--muted)]">
-              Full videos — watch & download
-            </p>
-          </div>
-          <span className="text-xs text-[color:var(--muted)]">
-            {libraryJobs.length} videos
-          </span>
-        </div>
-
-        {libraryJobs.length === 0 && activeJobs.length === 0 ? (
-          <div
-            className="rounded-2xl border border-dashed px-6 py-12 text-center text-sm text-[color:var(--muted)]"
-            style={{ borderColor: "var(--line)" }}
-          >
-            No videos yet. Write a prompt to create your first one.
-          </div>
-        ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {libraryJobs.map((job) => {
-              const failed = job.status === "failed";
-              const canWatch =
-                Boolean(job.preview_url) ||
-                Boolean(job.storage_path) ||
-                job.status === "ready";
-              const mediaSrc = `/api/jobs/${job.id}/preview`;
-              return (
-                <article
-                  key={job.id}
-                  className="group relative overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]"
-                >
-                  <div className="relative aspect-[4/5] bg-black/50">
-                    {canWatch && !failed ? (
-                      <video
-                        key={job.id}
-                        src={mediaSrc}
-                        poster={job.thumbnail_url || undefined}
-                        className="h-full w-full object-contain bg-black"
-                        controls
-                        playsInline
-                        preload="metadata"
-                        controlsList="nodownload"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center px-3 text-center text-xs text-[color:var(--muted)]">
-                        {failed ? "Failed" : "No preview yet"}
-                      </div>
-                    )}
-
-                    <CardMenuSlot>
-                      <CardMenu
-                        items={[
-                          ...(canWatch && !failed
-                            ? [
-                                {
-                                  label: "Download",
-                                  onClick: () =>
-                                    void downloadVideo(
-                                      job.id,
-                                      `${(job.title || "orzuai").replace(/[^\w\-]+/g, "_").slice(0, 40)}.mp4`,
-                                    ),
-                                },
-                                {
-                                  label: "Open",
-                                  href: mediaSrc,
-                                },
-                              ]
-                            : []),
-                          {
-                            label: busyId === job.id ? "Deleting…" : "Delete",
-                            danger: true,
-                            disabled: busyId === job.id,
-                            onClick: () => void removeCreation(job.id),
-                          },
-                        ]}
-                      />
-                    </CardMenuSlot>
-                  </div>
-
-                  <div className="space-y-1.5 p-3">
-                    <p className="line-clamp-2 text-sm font-medium leading-snug">
-                      {titleOf(job)}
-                    </p>
-                    {promptOf(job) && (
-                      <p className="line-clamp-1 text-[11px] text-[color:var(--muted)]">
-                        {promptOf(job)}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--muted)]">
-                      <span
-                        style={{
-                          color: failed ? "var(--danger)" : statusColor(job.status),
-                        }}
-                      >
-                        {failed
-                          ? "Failed"
-                          : job.status === "ready"
-                            ? "Ready"
-                            : JOB_STATUS_LABEL[job.status] || job.status}
-                      </span>
-                      <span>·</span>
-                      <span>{aspectOf(job)}</span>
-                      <span>·</span>
-                      <span>{durationLabel(job)}</span>
-                    </div>
-                    {failed && job.error_message && (
-                      <p className="line-clamp-2 text-[11px] text-[color:var(--danger)]">
-                        {job.error_message}
-                      </p>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      {/* Progress dock */}
-      {activeJobs.length > 0 && (
-        <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex w-[min(100%-2rem,280px)] flex-col gap-2 sm:bottom-6 sm:right-6">
-          {activeJobs.map((job) => {
-            const pct = jobProgressPercent(job.status);
+          {(
+            [
+              { id: "create" as const, label: "Create" },
+              { id: "library" as const, label: "My creations" },
+            ] as const
+          ).map((item) => {
+            const on = tab === item.id;
             return (
-              <div
-                key={job.id}
-                className="pointer-events-auto rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-3 shadow-xl backdrop-blur-md"
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                className="flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition"
+                style={{
+                  background: on ? "rgba(232,165,75,0.16)" : "transparent",
+                  color: on ? "var(--accent)" : "var(--muted)",
+                }}
               >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold">Creating video</p>
-                    <p className="truncate text-[10px] text-[color:var(--muted)]">
-                      {JOB_STATUS_LABEL[job.status] || job.status}
-                    </p>
-                  </div>
-                  <span
-                    className="font-[family-name:var(--font-syne)] text-base tabular-nums"
-                    style={{ color: "var(--accent)", fontWeight: 700 }}
-                  >
-                    {pct}%
-                  </span>
-                </div>
-                <div
-                  className="h-1.5 overflow-hidden rounded-full"
-                  style={{ background: "rgba(255,255,255,0.06)" }}
-                >
-                  <div
-                    className="h-full rounded-full transition-all duration-500 ease-out"
-                    style={{
-                      width: `${pct}%`,
-                      background:
-                        "linear-gradient(90deg, var(--accent-dim), var(--accent))",
-                    }}
-                  />
-                </div>
-              </div>
+                {item.label}
+              </button>
             );
           })}
-        </div>
+        </nav>
+      </header>
+
+      {tab === "create" && (
+        <section className="rise-delay">
+          <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] focus-within:border-[color:rgba(232,165,75,0.45)]">
+            <textarea
+              className="min-h-[160px] w-full resize-y border-0 bg-transparent px-4 pt-4 pb-2 text-base leading-relaxed outline-none placeholder:text-[color:var(--muted)]"
+              placeholder="Describe the video you want…"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              disabled={creating}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  void createVideo();
+                }
+              }}
+            />
+            <div className="flex flex-wrap items-center gap-2 border-t border-[color:var(--line)] px-3 py-2.5">
+              <PromptChip
+                label="Format"
+                value={aspectChipLabel}
+                open={openChip === "format"}
+                onOpenChange={(open) => setOpenChip(open ? "format" : null)}
+              >
+                {ASPECTS.map((a) => {
+                  const on = aspect === a.id;
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      role="option"
+                      aria-selected={on}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/5"
+                      style={{ color: on ? "var(--accent)" : "var(--fg)" }}
+                      onClick={() => {
+                        setAspect(a.id);
+                        setOpenChip(null);
+                      }}
+                    >
+                      <span className="font-semibold">{a.label}</span>
+                      <span className="text-xs text-[color:var(--muted)]">
+                        {a.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </PromptChip>
+
+              <PromptChip
+                label="Time"
+                value={durationChipLabel}
+                open={openChip === "duration"}
+                onOpenChange={(open) => setOpenChip(open ? "duration" : null)}
+              >
+                {DURATIONS.map((d) => {
+                  const on = durationId === d.id;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      role="option"
+                      aria-selected={on}
+                      className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition hover:bg-white/5"
+                      style={{ color: on ? "var(--accent)" : "var(--fg)" }}
+                      onClick={() => {
+                        setDurationId(d.id);
+                        setOpenChip(null);
+                      }}
+                    >
+                      <span className="font-semibold">{d.label}</span>
+                      {d.id === "auto" && (
+                        <span className="text-[10px] text-[color:var(--muted)]">
+                          AI picks
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </PromptChip>
+
+              <div className="ml-auto">
+                <button
+                  type="button"
+                  className="btn btn-primary px-5 text-sm"
+                  disabled={creating || prompt.trim().length < 8}
+                  onClick={() => void createVideo()}
+                >
+                  {creating ? "Starting…" : "Generate"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {tab === "library" && (
+        <section className="rise-delay space-y-4">
+          {libraryJobs.length === 0 && activeJobs.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-[color:var(--line)] p-10 text-center text-sm text-[color:var(--muted)]">
+              No videos yet. Create one in the Create tab.
+            </p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[...activeJobs, ...libraryJobs].map((job) => {
+                const failed = job.status === "failed";
+                const busy = QUEUE_STATUSES.has(job.status);
+                const canWatch =
+                  Boolean(job.preview_url) ||
+                  Boolean(job.storage_path) ||
+                  job.status === "ready";
+                const mediaSrc = `/api/jobs/${job.id}/preview`;
+                const pct = jobProgressPercent(job.status);
+                return (
+                  <article
+                    key={job.id}
+                    className="group relative overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]"
+                  >
+                    <div className="relative aspect-[4/5] bg-black/50">
+                      {canWatch && !failed && !busy ? (
+                        <video
+                          key={job.id}
+                          src={mediaSrc}
+                          poster={job.thumbnail_url || undefined}
+                          className="h-full w-full object-contain bg-black"
+                          controls
+                          playsInline
+                          preload="metadata"
+                          controlsList="nodownload"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                          <p
+                            className="text-sm font-semibold"
+                            style={{
+                              color: failed
+                                ? "var(--danger)"
+                                : statusColor(job.status),
+                            }}
+                          >
+                            {failed
+                              ? "Failed"
+                              : JOB_STATUS_LABEL[job.status] || job.status}
+                          </p>
+                          {busy && (
+                            <>
+                              <p className="text-2xl font-bold tabular-nums">
+                                {pct}%
+                              </p>
+                              <div className="h-1.5 w-2/3 overflow-hidden rounded-full bg-white/10">
+                                <div
+                                  className="h-full rounded-full transition-all"
+                                  style={{
+                                    width: `${pct}%`,
+                                    background: "var(--accent)",
+                                  }}
+                                />
+                              </div>
+                            </>
+                          )}
+                          {failed && job.error_message && (
+                            <p className="line-clamp-3 text-xs text-[color:var(--muted)]">
+                              {job.error_message}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {canWatch && !failed && !busy && (
+                        <a
+                          href={`/dashboard/editor/${job.id}`}
+                          className="absolute left-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
+                          aria-label="Edit"
+                          title="Edit"
+                        >
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden
+                          >
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                          </svg>
+                        </a>
+                      )}
+
+                      <CardMenuSlot>
+                        <CardMenu
+                          items={[
+                            ...(canWatch && !failed && !busy
+                              ? [
+                                  {
+                                    label: "Edit",
+                                    href: `/dashboard/editor/${job.id}`,
+                                  },
+                                  {
+                                    label: "Download",
+                                    onClick: () =>
+                                      void downloadVideo(
+                                        job.id,
+                                        `${(job.title || "orzuai").replace(/[^\w\-]+/g, "_").slice(0, 40)}.mp4`,
+                                      ),
+                                  },
+                                  {
+                                    label: "Open",
+                                    href: mediaSrc,
+                                  },
+                                ]
+                              : []),
+                            {
+                              label: busyId === job.id ? "Deleting…" : "Delete",
+                              danger: true,
+                              disabled: busyId === job.id || busy,
+                              onClick: () => void removeCreation(job.id),
+                            },
+                          ]}
+                        />
+                      </CardMenuSlot>
+                    </div>
+
+                    <div className="space-y-1 border-t border-[color:var(--line)] p-3">
+                      <p className="line-clamp-2 text-sm font-medium leading-snug">
+                        {titleOf(job)}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--muted)]">
+                        <span>{aspectOf(job)}</span>
+                        <span>·</span>
+                        <span>{durationLabel(job)}</span>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

@@ -90,12 +90,17 @@ export async function GET(request: Request) {
       `orzu-media${ext}`,
     );
 
+    const inline = url.searchParams.get("inline") === "1";
+    const disposition = inline
+      ? "inline"
+      : `attachment; filename="${name}"`;
+
     return new NextResponse(upstream.body, {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        "Content-Disposition": `attachment; filename="${name}"`,
-        "Cache-Control": "no-store",
+        "Content-Disposition": disposition,
+        "Cache-Control": inline ? "public, max-age=3600" : "no-store",
       },
     });
   } catch (e) {

@@ -9,7 +9,8 @@ from pathlib import Path
 
 from orzuvideo.config import TEMP_DIR, settings
 from orzuvideo.pipeline import clipping as clip_pipe
-from orzuvideo.pipeline.editor import build_short
+from orzuvideo.pipeline import reedit as reedit_pipe
+from orzuvideo.pipeline.editor import build_short, mix_audio
 from orzuvideo.pipeline.media import ffprobe_duration, synthesize_with_timestamps
 from orzuvideo.services import db
 from orzuvideo.services.jamendo import attribution_line, download_background_music
@@ -71,6 +72,12 @@ def _clip_count_for_duration(base: int, duration_sec: int) -> int:
     return min(30, max(base, 16))
 
 
+def _is_reedit_job(meta: dict) -> bool:
+    source = str(meta.get("source") or "").strip().lower()
+    pipeline = str(meta.get("pipeline") or "").strip().lower()
+    return source == "reedit" or pipeline == "reedit"
+
+
 def _is_clipping_job(meta: dict) -> bool:
     source = str(meta.get("source") or "").strip().lower()
     pipeline = str(meta.get("pipeline") or "").strip().lower()
@@ -82,7 +89,7 @@ def _is_clipping_job(meta: dict) -> bool:
 
 def _is_creativity_job(job: dict, meta: dict) -> bool:
     """Creativity = platform prompt video. Must NEVER use AI Training / YouTube settings."""
-    if _is_clipping_job(meta):
+    if _is_clipping_job(meta) or _is_reedit_job(meta):
         return False
     source = str(meta.get("source") or "").strip().lower()
     pipeline = str(meta.get("pipeline") or "").strip().lower()
@@ -106,7 +113,7 @@ def _download_job_video(url: str, dest: Path) -> Path:
 
 
 def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
-    """Long device video → short viral cut (no YouTube / no AI Training)."""
+    """One or more source videos → short viral cut (no YouTube / no AI Training)."""
     job_id = job["id"]
     user_id = job["user_id"]
     meta0 = _job_meta(job)
@@ -118,21 +125,39 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         target_dur = 30.0
     target_dur = max(15.0, min(60.0, target_dur))
 
-    add_subs = bool(meta0.get("add_subtitles", True))
     add_music = bool(meta0.get("add_music", True))
-    add_effects = bool(meta0.get("add_effects", True))
+    # Always apply AI polish
+    add_effects = True
+    add_transitions = True
+    use_voice = bool(meta0.get("use_voice", True))
+    voice_id = str(meta0.get("voice_id") or settings.elevenlabs_voice_id or "").strip()
+    music_track_id = str(meta0.get("music_track_id") or "").strip() or None
+    music_group = str(meta0.get("music_group") or "").strip() or None
     instructions = (meta0.get("user_brief") or meta0.get("instructions") or "").strip() or None
 
-    source_url = (
-        str(meta0.get("source_url") or "").strip()
-        or str(job.get("preview_url") or "").strip()
-    )
-    if not source_url:
-        raise RuntimeError("AI Clipping job missing source video URL")
+    raw_sources = meta0.get("sources")
+    sources: list[dict] = []
+    if isinstance(raw_sources, list) and raw_sources:
+        for s in raw_sources:
+            if isinstance(s, dict):
+                sources.append(s)
+    if not sources:
+        sources = [
+            {
+                "url": str(meta0.get("source_url") or job.get("preview_url") or "").strip(),
+                "storage_path": meta0.get("source_storage_path") or job.get("storage_path"),
+                "storage_bucket": job.get("storage_bucket") or "short-previews",
+                "title": job.get("title") or "AI Clip",
+            }
+        ]
+    sources = [s for s in sources if s.get("url") or s.get("storage_path")]
+    if not sources:
+        raise RuntimeError("AI Clipping job missing source video")
 
     print(
-        f"[CLIPPING] job={job_id} aspect={aspect} target={target_dur}s "
-        f"subs={add_subs} music={add_music} effects={add_effects}"
+        f"[CLIPPING] job={job_id} sources={len(sources)} aspect={aspect} "
+        f"target={target_dur}s voice={use_voice} music={add_music} "
+        f"track={music_track_id} group={music_group}"
     )
 
     db.update_job(
@@ -147,85 +172,99 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
             "aspect_ratio": aspect,
             "output_size": [out_w, out_h],
             "duration_seconds": int(target_dur),
+            "sources": sources,
         },
     )
 
-    source = work / "source.mp4"
-    _download_job_video(source_url, source)
-    source_dur = ffprobe_duration(source)
-    if source_dur < 8:
-        raise RuntimeError("Source video is too short (need at least ~8 seconds)")
+    n = len(sources)
+    per = max(4.0, target_dur / n)
+    framed_clips: list[Path] = []
+    titles: list[str] = []
+    all_transcript = []
 
-    transcript = ""
-    words: list = []
-    audio_full = work / "source_audio.mp3"
-    try:
-        clip_pipe.extract_audio(source, audio_full)
-        transcript, words = clip_pipe.transcribe_source(
-            audio_full, user_id=user_id, job_id=job_id
+    for i, src in enumerate(sources):
+        local = work / f"source_{i}.mp4"
+        clip_pipe.fetch_source_file(sb, src, local)
+        source_dur = ffprobe_duration(local)
+        if source_dur < 3:
+            print(f"[CLIPPING] skip source {i}: too short ({source_dur:.1f}s)")
+            continue
+
+        seg_target = min(per, source_dur - 0.25) if source_dur > 4 else source_dur
+        if n == 1:
+            seg_target = min(target_dur, source_dur - 0.1)
+
+        transcript = ""
+        words: list = []
+        audio_full = work / f"source_{i}_audio.mp3"
+        try:
+            extracted = clip_pipe.extract_audio(local, audio_full)
+            if extracted is None:
+                print(f"[CLIPPING] source {i} has no audio; skip transcription")
+            else:
+                transcript, words = clip_pipe.transcribe_source(
+                    extracted, user_id=user_id, job_id=job_id
+                )
+                if transcript:
+                    all_transcript.append(transcript)
+        except Exception as exc:
+            print(f"[CLIPPING] transcription skipped for source {i}: {exc}")
+
+        start, end, title = clip_pipe.pick_clip_window(
+            source_duration=source_dur,
+            target_duration=seg_target,
+            transcript=transcript,
+            instructions=instructions,
+            user_id=user_id,
+            job_id=job_id,
         )
-    except Exception as exc:
-        print(f"[CLIPPING] transcription skipped: {exc}")
+        clip_len = max(1.0, end - start)
+        titles.append(title)
+        print(f"[CLIPPING] source {i} window {start:.1f}-{end:.1f}s")
 
-    speech = clip_pipe.has_meaningful_speech(transcript, words)
-    # Auto-enable subs only when speech exists and user asked
-    want_subs = add_subs and speech
+        cut = work / f"cut_{i}.mp4"
+        clip_pipe.cut_segment(local, start, clip_len, cut)
+        framed = work / f"framed_{i}.mp4"
+        clip_pipe.reframe_clip(
+            cut, framed, width=out_w, height=out_h, effects=add_effects
+        )
+        framed_clips.append(framed)
 
-    start, end, title = clip_pipe.pick_clip_window(
-        source_duration=source_dur,
-        target_duration=target_dur,
-        transcript=transcript,
-        instructions=instructions,
-        user_id=user_id,
-        job_id=job_id,
-    )
-    clip_len = max(1.0, end - start)
-    print(f"[CLIPPING] window {start:.1f}-{end:.1f}s title={title!r} speech={speech}")
+    if not framed_clips:
+        raise RuntimeError("No usable source clips (videos too short?)")
 
-    db.update_job(
-        sb,
-        job_id,
-        status="editing",
-        title=title,
-        script_text=(transcript[:2000] if transcript else None),
-        duration_seconds=int(round(clip_len)),
-        metadata={
-            **meta0,
-            "source": "ai_clipping",
-            "pipeline": "ai_clipping",
-            "publish": False,
-            "aspect_ratio": aspect,
-            "output_size": [out_w, out_h],
-            "duration_seconds": int(round(clip_len)),
-            "clip_start": start,
-            "clip_end": end,
-            "has_speech": speech,
-        },
-    )
+    db.update_job(sb, job_id, status="editing")
 
-    cut = work / "cut.mp4"
-    clip_pipe.cut_segment(source, start, clip_len, cut)
+    combined = work / "combined.mp4"
+    if len(framed_clips) == 1:
+        combined.write_bytes(framed_clips[0].read_bytes())
+    else:
+        clip_pipe.concat_av_clips(
+            framed_clips,
+            combined,
+            work_dir=work / "concat",
+            use_transitions=add_transitions,
+        )
 
-    framed = work / "framed.mp4"
-    clip_pipe.reframe_clip(
-        cut, framed, width=out_w, height=out_h, effects=add_effects
-    )
-
-    voice_a = work / "clip_voice.aac"
-    clip_pipe.extract_clip_audio(framed, voice_a)
+    clip_len = ffprobe_duration(combined)
+    title = titles[0] if len(titles) == 1 else (titles[0] if titles else "AI Mix Clip")
+    if len(titles) > 1:
+        title = "AI Mix Clip"
 
     music_path = None
     music_attr = None
     if add_music:
         db.update_job(sb, job_id, status="fetching_media")
         try:
-            mood = "energetic upbeat"
-            if instructions:
+            mood = music_group or "energetic upbeat"
+            if instructions and not music_group:
                 mood = f"energetic {instructions[:40]}"
+            preferred = [music_track_id] if music_track_id else None
             track = download_background_music(
                 mood,
                 work / "music",
                 exclude_ids=set(),
+                preferred_ids=preferred,
             )
             if track and track.path:
                 music_path = track.path
@@ -233,27 +272,116 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         except Exception as exc:
             print(f"[CLIPPING] music skipped: {exc}")
 
+    voice_a = work / "clip_voice.aac"
+    tts_words: list = []
+    if use_voice:
+        # Prefer ElevenLabs narration from transcript; fallback to source audio
+        narr_text = " ".join(all_transcript).strip()
+        if narr_text and voice_id:
+            try:
+                db.update_job(sb, job_id, status="generating_voice")
+                tts_mp3 = work / "tts_voice.mp3"
+                tts_words = synthesize_with_timestamps(
+                    narr_text[:2500],
+                    tts_mp3,
+                    voice_id=voice_id,
+                )
+                # Pad/trim to clip length via mix_audio path later
+                voice_a = tts_mp3
+                print(f"[CLIPPING] ElevenLabs voice ok ({len(narr_text)} chars)")
+            except Exception as exc:
+                print(f"[CLIPPING] ElevenLabs failed, using source audio: {exc}")
+                clip_pipe.extract_clip_audio(combined, voice_a)
+        else:
+            clip_pipe.extract_clip_audio(combined, voice_a)
+    else:
+        # No voice — silent bed for music-only mix
+        from orzuvideo.pipeline.media import run_ffmpeg
+
+        run_ffmpeg(
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                f"anullsrc=r=44100:cl=stereo",
+                "-t",
+                f"{clip_len:.3f}",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                str(voice_a),
+            ]
+        )
+
     mixed_a = work / "mixed.aac"
-    clip_pipe.mix_clip_music(voice_a, music_path, mixed_a, duration=clip_len)
+    if use_voice:
+        clip_pipe.mix_clip_music(voice_a, music_path, mixed_a, duration=clip_len)
+    elif music_path:
+        # Music only (louder bed)
+        from orzuvideo.pipeline.editor import mix_audio
+
+        mix_audio(
+            voice_a,
+            music_path,
+            mixed_a,
+            voice_duration=clip_len,
+            music_volume_hook=0.95,
+            music_volume_body=0.88,
+            voice_volume=0.05,
+        )
+    else:
+        mixed_a = voice_a
 
     muxed = work / "muxed.mp4"
-    clip_pipe.mux_video_audio(framed, mixed_a, muxed)
+    clip_pipe.mux_video_audio(combined, mixed_a, muxed)
 
     final = work / "clip_final.mp4"
-    if want_subs:
-        window_words = clip_pipe.words_in_window(words, start, end)
-        clip_pipe.burn_subs_keep_audio(
-            muxed,
-            window_words,
-            final,
-            work_dir=work,
-            size=(out_w, out_h),
-        )
+    want_subs = False
+    if use_voice:
+        try:
+            words_for_subs = tts_words
+            if not words_for_subs:
+                final_audio = work / "final_audio.mp3"
+                extracted = clip_pipe.extract_audio(muxed, final_audio)
+                if extracted is None:
+                    words_for_subs = []
+                else:
+                    _t, words_for_subs = clip_pipe.transcribe_source(
+                        extracted, user_id=user_id, job_id=job_id
+                    )
+            if words_for_subs and clip_pipe.has_meaningful_speech(
+                " ".join(w.word for w in words_for_subs), words_for_subs
+            ):
+                clip_pipe.burn_subs_keep_audio(
+                    muxed,
+                    words_for_subs,
+                    final,
+                    work_dir=work,
+                    size=(out_w, out_h),
+                )
+                want_subs = True
+            else:
+                final.write_bytes(muxed.read_bytes())
+        except Exception as exc:
+            print(f"[CLIPPING] captions skipped: {exc}")
+            final.write_bytes(muxed.read_bytes())
     else:
         final.write_bytes(muxed.read_bytes())
 
     db.update_job(sb, job_id, status="uploading")
     stored = upload_preview(sb, user_id=user_id, job_id=job_id, video_path=final)
+
+    # Drop long device source paths from metadata — only the AI clip remains
+    cleaned_sources: list[dict] = []
+    for src in sources:
+        row = dict(src)
+        if str(row.get("kind") or "").lower() == "device":
+            row["storage_path"] = None
+            row["url"] = None
+            row["deleted"] = True
+        cleaned_sources.append(row)
+
     meta_done = {
         **meta0,
         "source": "ai_clipping",
@@ -262,12 +390,17 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         "aspect_ratio": aspect,
         "output_size": [out_w, out_h],
         "duration_seconds": int(round(clip_len)),
-        "clip_start": start,
-        "clip_end": end,
-        "has_speech": speech,
+        "sources": cleaned_sources,
+        "source_url": None,
+        "source_storage_path": None,
         "add_subtitles": want_subs,
         "add_music": bool(music_path),
-        "add_effects": add_effects,
+        "add_effects": True,
+        "add_transitions": True,
+        "use_voice": use_voice,
+        "voice_id": voice_id if use_voice else None,
+        "music_track_id": music_track_id,
+        "music_group": music_group,
         "music_attribution": music_attr,
         **storage_meta(stored),
     }
@@ -282,9 +415,177 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         duration_seconds=int(round(clip_len)),
         storage_path=stored.path,
         storage_bucket=stored.bucket,
+        script_text=("\n\n".join(all_transcript)[:2000] if all_transcript else None),
         metadata=meta_done,
     )
+
+    # Remove long device source files — keep only the AI clip in Storage/DB job row
+    for src in sources:
+        if str(src.get("kind") or "").lower() != "device":
+            continue
+        sp = str(src.get("storage_path") or "").strip()
+        bucket = str(src.get("storage_bucket") or "short-previews").strip()
+        if not sp:
+            continue
+        try:
+            sb.storage.from_(bucket).remove([sp])
+            print(f"[CLIPPING] deleted source {bucket}/{sp}")
+        except Exception as exc:
+            print(f"[CLIPPING] source cleanup skipped: {exc}")
+
+    # Also wipe any leftover files under clipping/{job_id}/
+    try:
+        folder = f"{user_id}/clipping/{job_id}"
+        listed = sb.storage.from_("short-previews").list(folder)
+        names = [f"{folder}/{x['name']}" for x in (listed or []) if x.get("name")]
+        if names:
+            sb.storage.from_("short-previews").remove(names)
+            print(f"[CLIPPING] cleared folder {folder} ({len(names)} files)")
+    except Exception as exc:
+        print(f"[CLIPPING] folder cleanup skipped: {exc}")
+
     print(f"[CLIPPING] ready job={job_id} url={stored.public_url}")
+
+
+def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
+    """Re-edit an existing ready MP4: trim, look, music mix → new preview."""
+    job_id = job["id"]
+    user_id = job["user_id"]
+    meta0 = _job_meta(job)
+
+    bucket = str(meta0.get("source_storage_bucket") or "short-previews").strip()
+    path = str(meta0.get("source_storage_path") or "").strip()
+    url = str(meta0.get("source_preview_url") or "").strip()
+
+    source = work / "source.mp4"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    if path:
+        try:
+            data = sb.storage.from_(bucket).download(path)
+            source.write_bytes(data)
+        except Exception as exc:
+            print(f"[REEDIT] storage download failed: {exc}")
+            path = ""
+    need_http = (not path) or (not source.exists()) or source.stat().st_size < 1000
+    if need_http and url:
+        import httpx
+
+        with httpx.Client(timeout=300.0, follow_redirects=True) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            source.write_bytes(r.content)
+    if not source.exists() or source.stat().st_size < 1000:
+        raise RuntimeError("Re-edit source video missing")
+
+    try:
+        trim_start = float(meta0.get("trim_start") or 0)
+    except (TypeError, ValueError):
+        trim_start = 0.0
+    trim_end = meta0.get("trim_end")
+    try:
+        trim_end_f = float(trim_end) if trim_end is not None else None
+    except (TypeError, ValueError):
+        trim_end_f = None
+
+    effect = str(meta0.get("effect") or "none").strip()
+    motion = str(meta0.get("motion") or "none").strip()
+    intro_fade = str(meta0.get("intro_fade") or "none").strip()
+    outro_fade = str(meta0.get("outro_fade") or "none").strip()
+    music_mode = str(meta0.get("music_mode") or "none").strip()
+    music_track_id = str(meta0.get("music_track_id") or "").strip() or None
+    try:
+        music_volume = float(meta0.get("music_volume") or 0.45)
+    except (TypeError, ValueError):
+        music_volume = 0.45
+    keep_original = bool(meta0.get("keep_original_audio", True))
+
+    print(
+        f"[REEDIT] job={job_id} effect={effect} motion={motion} "
+        f"music={music_mode} keep_audio={keep_original}"
+    )
+
+    db.update_job(sb, job_id, status="editing", metadata={**meta0})
+
+    trimmed = work / "trimmed.mp4"
+    reedit_pipe.trim_clip(source, trimmed, start=trim_start, end=trim_end_f)
+
+    looked = work / "look.mp4"
+    reedit_pipe.apply_look(
+        trimmed,
+        looked,
+        effect=effect,
+        motion=motion,
+        intro_fade=intro_fade,
+        outro_fade=outro_fade,
+    )
+
+    clip_len = ffprobe_duration(looked)
+    voice_a = work / "voice.aac"
+    if keep_original:
+        reedit_pipe.extract_or_silence(looked, voice_a)
+    else:
+        from orzuvideo.pipeline.media import make_silent_audio
+
+        make_silent_audio(voice_a, clip_len)
+
+    music_path = None
+    music_attr = None
+    if music_mode in ("auto", "track"):
+        db.update_job(sb, job_id, status="fetching_media")
+        try:
+            preferred = [music_track_id] if music_track_id else None
+            track = download_background_music(
+                "energetic soundtrack",
+                work / "music",
+                exclude_ids=set(),
+                preferred_ids=preferred,
+            )
+            if track and track.path:
+                music_path = track.path
+                music_attr = attribution_line(track)
+        except Exception as exc:
+            print(f"[REEDIT] music skipped: {exc}")
+
+    mixed_a = work / "mixed.aac"
+    if music_path:
+        mix_audio(
+            voice_a,
+            music_path,
+            mixed_a,
+            voice_duration=clip_len,
+            music_volume_hook=max(0.2, min(1.0, music_volume + 0.1)),
+            music_volume_body=max(0.15, min(1.0, music_volume)),
+            voice_volume=1.05 if keep_original else 0.05,
+        )
+    else:
+        mixed_a = voice_a
+
+    final = work / "final.mp4"
+    reedit_pipe.mux_av(looked, mixed_a, final)
+
+    db.update_job(sb, job_id, status="uploading")
+    stored = upload_preview(sb, user_id=user_id, job_id=job_id, video_path=final)
+
+    db.update_job(
+        sb,
+        job_id,
+        status="ready",
+        preview_url=stored.public_url,
+        video_path=str(final),
+        duration_seconds=int(round(clip_len)),
+        completed_at=datetime.now(timezone.utc).isoformat(),
+        error_message=None,
+        metadata={
+            **meta0,
+            "source": "reedit",
+            "pipeline": "reedit",
+            "publish": False,
+            "music_attribution": music_attr,
+            "add_music": bool(music_path),
+            **storage_meta(stored),
+        },
+    )
+    print(f"[REEDIT] ready job={job_id} url={stored.public_url}")
 
 
 def process_job(job: dict) -> None:
@@ -295,6 +596,19 @@ def process_job(job: dict) -> None:
     work.mkdir(parents=True, exist_ok=True)
     meta0 = _job_meta(job)
     user_brief = (meta0.get("user_brief") or "").strip() or None
+
+    if _is_reedit_job(meta0):
+        try:
+            _process_reedit_job(job, sb=sb, work=work)
+        except Exception as exc:
+            db.update_job(
+                sb,
+                job_id,
+                status="failed",
+                error_message=f"{exc}\n{traceback.format_exc()[-1500:]}",
+            )
+            raise
+        return
 
     if _is_clipping_job(meta0):
         try:

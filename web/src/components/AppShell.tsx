@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChannelsMenu } from "@/components/ChannelsMenu";
+import { ClippingProgressDock } from "@/components/ClippingProgressDock";
 
 type NavItem = {
   href: string;
@@ -22,8 +23,8 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Media", exact: true },
   { href: "/dashboard/clipping", label: "AI Clipping" },
-  { href: "/dashboard/content", label: "Content" },
-  { href: "/dashboard/worker", label: "Worker" },
+  { href: "/dashboard/content", label: "Creativity" },
+  { href: "/dashboard/favorites", label: "Favorites" },
   { href: "/dashboard/costs", label: "Costs" },
 ];
 
@@ -222,7 +223,16 @@ export function AppShell({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const isMedia = pathname === "/dashboard";
+  const isEditor = pathname.startsWith("/dashboard/editor");
   const ctx = { menuOpen, setMenuOpen };
+
+  if (isEditor) {
+    return (
+      <ChannelsContext.Provider value={ctx}>
+        <div className="min-h-screen w-full bg-[color:var(--bg)]">{children}</div>
+      </ChannelsContext.Provider>
+    );
+  }
 
   return (
     <ChannelsContext.Provider value={ctx}>
@@ -286,6 +296,7 @@ export function AppShell({
         <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
           {children}
         </main>
+        <ClippingProgressDock />
       </div>
     </ChannelsContext.Provider>
   );

@@ -20,6 +20,9 @@ export default async function ClippingPage() {
   const jobs = ((data || []) as VideoJob[]).filter((j) => {
     const src = String(j.metadata?.source || "").toLowerCase();
     const pipe = String(j.metadata?.pipeline || "").toLowerCase();
+    if (src === "reedit" || pipe === "reedit") {
+      return String(j.metadata?.library || "") === "clipping";
+    }
     return src === "ai_clipping" || pipe === "ai_clipping" || src === "clipping";
   });
 

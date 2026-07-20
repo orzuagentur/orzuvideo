@@ -4,12 +4,20 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from openai import OpenAI
 
 from orzuvideo.config import settings
 from orzuvideo.pipeline.editor import mix_audio
-from orzuvideo.pipeline.media import WordTiming, ffprobe_duration, run_ffmpeg, write_ass_subtitles
+from orzuvideo.pipeline.media import (
+    WordTiming,
+    ffprobe_duration,
+    has_audio_stream,
+    make_silent_audio,
+    run_ffmpeg,
+    write_ass_subtitles,
+)
 from orzuvideo.services.usage import estimate_openai_cost, log_usage
 
 
@@ -18,7 +26,14 @@ def _escape_ass_path(path: Path) -> str:
     return p.replace(":", "\\:").replace("'", r"\'")
 
 
-def extract_audio(source: Path, out: Path) -> Path:
+def extract_audio(source: Path, out: Path) -> Path | None:
+    """
+    Extract mono MP3 for Whisper.
+    Returns None when the source has no audio stream (common for silent stock clips).
+    """
+    if not has_audio_stream(source):
+        print(f"[CLIPPING] no audio stream in {source.name}; skip extract")
+        return None
     out.parent.mkdir(parents=True, exist_ok=True)
     run_ffmpeg(
         [
@@ -160,29 +175,26 @@ def pick_clip_window(
 
 def cut_segment(source: Path, start: float, duration: float, out: Path) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
-    run_ffmpeg(
-        [
-            "-ss",
-            f"{max(0.0, start):.3f}",
-            "-i",
-            str(source),
-            "-t",
-            f"{max(1.0, duration):.3f}",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "18",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(out),
-        ]
-    )
+    args = [
+        "-ss",
+        f"{max(0.0, start):.3f}",
+        "-i",
+        str(source),
+        "-t",
+        f"{max(1.0, duration):.3f}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "18",
+    ]
+    if has_audio_stream(source):
+        args.extend(["-c:a", "aac", "-b:a", "192k"])
+    else:
+        args.append("-an")
+    args.extend(["-movflags", "+faststart", str(out)])
+    run_ffmpeg(args)
     return out
 
 
@@ -216,33 +228,67 @@ def reframe_clip(
     else:
         vf = base
 
-    run_ffmpeg(
-        [
-            "-i",
-            str(source),
-            "-vf",
-            vf,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "19",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(out),
-        ]
-    )
+    args = [
+        "-i",
+        str(source),
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "19",
+        "-pix_fmt",
+        "yuv420p",
+    ]
+    if has_audio_stream(source):
+        args.extend(["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(out)])
+        run_ffmpeg(args)
+        return out
+
+    # Video-only source → attach silence so later mux/mix never fail
+    args = [
+        "-i",
+        str(source),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=44100:cl=stereo",
+        "-vf",
+        vf,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "19",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-shortest",
+        "-movflags",
+        "+faststart",
+        str(out),
+    ]
+    run_ffmpeg(args)
     return out
 
 
 def extract_clip_audio(video: Path, out: Path) -> Path:
+    """Extract AAC from video, or synthesize silence if the clip has no audio."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if not has_audio_stream(video):
+        dur = ffprobe_duration(video)
+        print(f"[CLIPPING] no audio in {video.name}; using silence ({dur:.1f}s)")
+        return make_silent_audio(out, dur)
     run_ffmpeg(
         [
             "-i",
@@ -351,6 +397,155 @@ def has_meaningful_speech(transcript: str, words: list[WordTiming]) -> bool:
     return len(words) >= 12
 
 
+def concat_av_clips(
+    clips: list[Path],
+    out: Path,
+    *,
+    work_dir: Path,
+    use_transitions: bool = True,
+) -> Path:
+    """Join AV clips with optional xfade / acrossfade, else hard concat."""
+    from orzuvideo.pipeline.montage import concat_with_pro_transitions, pick_transition
+
+    if len(clips) == 1:
+        out.write_bytes(clips[0].read_bytes())
+        return out
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    if not use_transitions:
+        # demuxer concat (re-encode for safety)
+        list_file = work_dir / "concat.txt"
+        list_file.write_text(
+            "".join(f"file '{c.resolve().as_posix()}'\n" for c in clips),
+            encoding="utf-8",
+        )
+        run_ffmpeg(
+            [
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_file),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "19",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ]
+        )
+        return out
+
+    # Video xfade + audio acrossfade
+    durations = [ffprobe_duration(c) for c in clips]
+    overlap = 0.45
+    inputs: list[str] = []
+    for c in clips:
+        inputs.extend(["-i", str(c)])
+
+    v_filters: list[str] = []
+    a_filters: list[str] = []
+    offset = max(0.05, durations[0] - overlap)
+    prev_v = "[0:v]"
+    prev_a = "[0:a]"
+    last_tr: str | None = None
+
+    for i in range(1, len(clips)):
+        tr = pick_transition(exclude=last_tr)
+        last_tr = tr
+        dur = min(overlap, 0.6)
+        v_out = f"[v{i}]" if i < len(clips) - 1 else "[vout]"
+        a_out = f"[a{i}]" if i < len(clips) - 1 else "[aout]"
+        v_filters.append(
+            f"{prev_v}[{i}:v]xfade=transition={tr}:duration={dur:.3f}:offset={offset:.3f}{v_out}"
+        )
+        a_filters.append(
+            f"{prev_a}[{i}:a]acrossfade=d={dur:.3f}:c1=tri:c2=tri{a_out}"
+        )
+        prev_v = v_out
+        prev_a = a_out
+        if i < len(clips) - 1:
+            offset += durations[i] - dur
+
+    # Fallback if audio missing on some clips: video-only then silent
+    try:
+        run_ffmpeg(
+            [
+                *inputs,
+                "-filter_complex",
+                ";".join(v_filters + a_filters),
+                "-map",
+                "[vout]",
+                "-map",
+                "[aout]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "fast",
+                "-crf",
+                "19",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ]
+        )
+    except Exception as exc:
+        print(f"[CLIPPING] AV xfade failed ({exc}); video-only concat")
+        vid_only = work_dir / "vout_only.mp4"
+        concat_with_pro_transitions(clips, vid_only, overlap=overlap)
+        # mix first clip audio loop length
+        audio = work_dir / "a0.aac"
+        extract_clip_audio(clips[0], audio)
+        mux_video_audio(vid_only, audio, out)
+    return out
+
+
+def fetch_source_file(
+    sb: Any,
+    src: dict,
+    dest: Path,
+) -> Path:
+    """Prefer Storage download; fall back to HTTP URL."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    bucket = str(src.get("storage_bucket") or "short-previews").strip()
+    path = str(src.get("storage_path") or "").strip()
+    if path:
+        try:
+            data = sb.storage.from_(bucket).download(path)
+            dest.write_bytes(data)
+            if dest.stat().st_size > 1000:
+                return dest
+        except Exception as exc:
+            print(f"[CLIPPING] storage download failed {bucket}/{path}: {exc}")
+
+    url = str(src.get("url") or "").strip()
+    if not url:
+        raise RuntimeError("Source missing storage_path and url")
+
+    import httpx
+
+    with httpx.Client(timeout=300.0, follow_redirects=True) as client:
+        r = client.get(url)
+        r.raise_for_status()
+        dest.write_bytes(r.content)
+    return dest
+
+
 def mix_clip_music(
     voice_audio: Path,
     music: Path | None,
@@ -367,3 +562,4 @@ def mix_clip_music(
         music_volume_body=0.28,
         voice_volume=1.08,
     )
+

@@ -1,21 +1,46 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/middleware";
 import { PREVIEW_BUCKET } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
 const ASPECTS = new Set(["9:16", "16:9", "1:1"]);
 const DURATIONS = new Set([15, 30, 45, 60]);
-const MAX_BYTES = 200 * 1024 * 1024;
+const MAX_SOURCES = 6;
 
-function sourceObjectPath(userId: string, jobId: string) {
-  return `${userId}/clipping/${jobId}/source.mp4`;
+const PEXELS_HOSTS = [
+  "videos.pexels.com",
+  "player.vimeo.com",
+  "vimeo.com",
+  "vod-progressive.akamaized.net",
+];
+
+function isAllowedMediaUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return false;
+    const host = u.hostname.toLowerCase();
+    return PEXELS_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
 }
 
+type SourceIn = {
+  kind?: string;
+  title?: string;
+  url?: string;
+  download_url?: string;
+  storage_path?: string;
+  storage_bucket?: string;
+  media_id?: string;
+  provider?: string;
+};
+
 /**
- * Upload a long device video and queue AI Clipping.
- * Does not require YouTube — output lands as a Ready draft.
+ * Queue an AI Clipping job.
+ * Device files: client-uploaded to Storage.
+ * Media: Pexels URLs from our Media search API.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -26,69 +51,141 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const form = await request.formData();
-  const file = form.get("file");
-  const aspectRaw = String(form.get("aspect_ratio") || "9:16").trim();
-  const durationRaw = Number(form.get("duration_seconds") || 30);
-  const instructions = String(form.get("instructions") || "").trim().slice(0, 800);
-  const addSubtitles = String(form.get("add_subtitles") ?? "1") !== "0";
-  const addMusic = String(form.get("add_music") ?? "1") !== "0";
-  const addEffects = String(form.get("add_effects") ?? "1") !== "0";
-  const titleHint = String(form.get("title") || "").trim().slice(0, 80);
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const aspectRaw = String(body.aspect_ratio || "9:16").trim();
+  const durationRaw = Number(body.duration_seconds || 30);
+  const instructions = String(body.instructions || body.user_brief || "")
+    .trim()
+    .slice(0, 800);
+  const addSubtitles = body.add_subtitles !== false;
+  const addMusic = body.add_music !== false;
+  const useVoice = body.use_voice !== false;
+  const voiceId = String(body.voice_id || "").trim() || null;
+  const musicTrackId = String(body.music_track_id || "").trim() || null;
+  const musicGroup = String(body.music_group || "").trim() || null;
+  // Effects + transitions are always on (AI)
+  const addEffects = true;
+  const addTransitions = true;
+  const titleHint = String(body.title || "").trim().slice(0, 80);
+  const jobId =
+    typeof body.job_id === "string" && body.job_id.length > 10
+      ? body.job_id
+      : crypto.randomUUID();
 
   const aspect_ratio = ASPECTS.has(aspectRaw) ? aspectRaw : "9:16";
   const duration_seconds = DURATIONS.has(durationRaw) ? durationRaw : 30;
 
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Choose a video from your device" }, { status: 400 });
+  const rawSources = Array.isArray(body.sources) ? (body.sources as SourceIn[]) : [];
+  if (rawSources.length === 0) {
+    return NextResponse.json(
+      { error: "Add at least one video (device or Media library)" },
+      { status: 400 },
+    );
   }
-  const name = file.name.toLowerCase();
-  if (
-    !file.type.includes("video") &&
-    !name.endsWith(".mp4") &&
-    !name.endsWith(".mov") &&
-    !name.endsWith(".webm")
-  ) {
-    return NextResponse.json({ error: "Upload MP4, MOV, or WebM" }, { status: 400 });
-  }
-  if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "File too large (max 200 MB)" }, { status: 400 });
-  }
-  if (file.size < 50_000) {
-    return NextResponse.json({ error: "File looks too small" }, { status: 400 });
+  if (rawSources.length > MAX_SOURCES) {
+    return NextResponse.json(
+      { error: `Maximum ${MAX_SOURCES} videos per clip` },
+      { status: 400 },
+    );
   }
 
-  const jobId = crypto.randomUUID();
-  const sourceKey = sourceObjectPath(user.id, jobId);
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const admin = createServiceClient();
+  const sources: Array<{
+    kind: string;
+    title: string;
+    url: string;
+    storage_path: string | null;
+    storage_bucket: string | null;
+    media_id: string | null;
+    provider: string | null;
+  }> = [];
 
-  const { error: upErr } = await admin.storage.from(PREVIEW_BUCKET).upload(sourceKey, bytes, {
-    contentType: file.type || "video/mp4",
-    upsert: true,
-  });
-  if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+  for (const s of rawSources) {
+    const kind = String(s.kind || "device").toLowerCase();
+    const title =
+      String(s.title || "Clip source").trim().slice(0, 120) || "Clip source";
+
+    if (kind === "media") {
+      const url = String(s.download_url || s.url || "").trim();
+      if (!url || !isAllowedMediaUrl(url)) {
+        return NextResponse.json(
+          { error: "Invalid Media / Pexels video URL" },
+          { status: 400 },
+        );
+      }
+      sources.push({
+        kind: "media",
+        title,
+        url,
+        storage_path: null,
+        storage_bucket: null,
+        media_id: String(s.media_id || "").trim() || null,
+        provider: String(s.provider || "pexels").trim() || "pexels",
+      });
+      continue;
+    }
+
+    // device
+    const storage_path = String(s.storage_path || "").trim() || null;
+    const storage_bucket =
+      String(s.storage_bucket || PREVIEW_BUCKET).trim() || PREVIEW_BUCKET;
+    let url = String(s.url || "").trim();
+
+    if (storage_path && !storage_path.startsWith(`${user.id}/`)) {
+      return NextResponse.json({ error: "Invalid storage path" }, { status: 400 });
+    }
+    if (!url && !storage_path) {
+      return NextResponse.json(
+        { error: "Each device source needs a storage path or URL" },
+        { status: 400 },
+      );
+    }
+    if (!url && storage_path) {
+      const { data: pub } = supabase.storage
+        .from(storage_bucket)
+        .getPublicUrl(storage_path);
+      url = pub.publicUrl;
+    }
+
+    sources.push({
+      kind: "device",
+      title,
+      url,
+      storage_path,
+      storage_bucket,
+      media_id: null,
+      provider: null,
+    });
   }
 
-  const { data: pub } = admin.storage.from(PREVIEW_BUCKET).getPublicUrl(sourceKey);
-  const source_url = pub.publicUrl;
-
+  const first = sources[0];
   const metadata = {
     publish: false,
     source: "ai_clipping",
     pipeline: "ai_clipping",
-    source_url,
-    source_storage_path: sourceKey,
+    sources,
+    source_url: first.url,
+    source_storage_path: first.storage_path,
     aspect_ratio,
     duration_seconds,
     duration_auto: false,
     add_subtitles: addSubtitles,
     add_music: addMusic,
     add_effects: addEffects,
+    add_transitions: addTransitions,
+    use_voice: useVoice,
+    voice_id: voiceId,
+    music_track_id: musicTrackId,
+    music_group: musicGroup,
     user_brief: instructions || null,
     instructions: instructions || null,
-    from_device: true,
+    from_device: sources.some((s) => s.kind === "device"),
+    from_media: sources.some((s) => s.kind === "media"),
   };
 
   const { data: job, error } = await supabase
@@ -99,10 +196,10 @@ export async function POST(request: Request) {
       youtube_channel_id: null,
       status: "queued",
       scheduled_for: new Date().toISOString(),
-      title: titleHint || "AI Clip",
-      preview_url: source_url,
-      storage_path: sourceKey,
-      storage_bucket: PREVIEW_BUCKET,
+      title: titleHint || (sources.length > 1 ? "AI Mix Clip" : "AI Clip"),
+      preview_url: first.kind === "device" ? first.url : null,
+      storage_path: first.storage_path,
+      storage_bucket: first.storage_bucket || PREVIEW_BUCKET,
       duration_seconds,
       metadata,
     })
@@ -113,7 +210,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Final cut is written by the worker to previewObjectPath(user, jobId)
   return NextResponse.json({
     ok: true,
     job_id: job.id,

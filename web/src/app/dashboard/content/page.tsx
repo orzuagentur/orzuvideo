@@ -18,8 +18,13 @@ export default async function CreativityPage() {
     .limit(80);
 
   const list = ((jobs as VideoJob[]) || []).filter((j) => {
-    const src = j.metadata?.source;
-    if (src === "creativity") return true;
+    const src = String(j.metadata?.source || "").toLowerCase();
+    const pipe = String(j.metadata?.pipeline || "").toLowerCase();
+    if (src === "reedit" || pipe === "reedit") {
+      return String(j.metadata?.library || "creativity") !== "clipping";
+    }
+    if (src === "creativity" || pipe === "creativity") return true;
+    if (src === "ai_clipping" || pipe === "ai_clipping") return false;
     if (!j.youtube_video_id && j.metadata?.publish === false) return true;
     return false;
   });

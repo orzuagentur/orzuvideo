@@ -214,6 +214,7 @@ export function MediaStudio() {
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<MediaCard | null>(null);
+  const [favKeys, setFavKeys] = useState<Set<string>>(() => new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [playProgress, setPlayProgress] = useState({ current: 0, duration: 0 });
@@ -340,6 +341,72 @@ export function MediaStudio() {
       audioRef.current?.pause();
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/favorites");
+      const data = await res.json().catch(() => ({}));
+      if (cancelled || !res.ok) return;
+      const keys = new Set<string>();
+      for (const row of (data.items || []) as Array<{
+        kind: string;
+        asset_id: string;
+      }>) {
+        keys.add(`${row.kind}:${row.asset_id}`);
+      }
+      setFavKeys(keys);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function toggleFavorite(item: MediaCard) {
+    const key = itemKey(item);
+    const active = favKeys.has(key);
+    setFavKeys((prev) => {
+      const next = new Set(prev);
+      if (active) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    try {
+      if (active) {
+        const res = await fetch(
+          `/api/favorites?kind=${encodeURIComponent(item.kind)}&asset_id=${encodeURIComponent(item.id)}`,
+          { method: "DELETE" },
+        );
+        if (!res.ok) throw new Error("remove failed");
+      } else {
+        const res = await fetch("/api/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            kind: item.kind,
+            asset_id: item.id,
+            title: item.title,
+            author: item.author,
+            thumb: item.thumb,
+            preview_url: item.previewUrl,
+            download_url: item.downloadUrl,
+            duration_sec: item.durationSec,
+            width: item.width,
+            height: item.height,
+            page_url: item.pageUrl,
+          }),
+        });
+        if (!res.ok) throw new Error("add failed");
+      }
+    } catch {
+      setFavKeys((prev) => {
+        const next = new Set(prev);
+        if (active) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -683,6 +750,7 @@ export function MediaStudio() {
                     item={item}
                     playing={playingId === itemKey(item)}
                     busy={busyId === itemKey(item)}
+                    favorited={favKeys.has(itemKey(item))}
                     progress={
                       playingId === itemKey(item)
                         ? playProgress
@@ -691,14 +759,17 @@ export function MediaStudio() {
                     onPlay={() => togglePlay(item)}
                     onSeek={seekPlay}
                     onDownload={() => void onDownload(item)}
+                    onToggleFavorite={() => void toggleFavorite(item)}
                   />
                 ) : (
                   <VisualCard
                     key={itemKey(item)}
                     item={item}
                     busy={busyId === itemKey(item)}
+                    favorited={favKeys.has(itemKey(item))}
                     onOpen={() => setViewer(item)}
                     onDownload={() => void onDownload(item)}
+                    onToggleFavorite={() => void toggleFavorite(item)}
                   />
                 ),
               )}
@@ -721,16 +792,57 @@ export function MediaStudio() {
   );
 }
 
+function FavHeart({
+  active,
+  onToggle,
+}: {
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="absolute left-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-base leading-none backdrop-blur transition hover:bg-black/75"
+      aria-label={active ? "Remove from favorites" : "Add to favorites"}
+      aria-pressed={active}
+      onClick={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onToggle();
+      }}
+      style={{ color: active ? "#ff4d6d" : "#fff" }}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill={active ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
+      </svg>
+    </button>
+  );
+}
+
 function VisualCard({
   item,
   busy,
+  favorited,
   onOpen,
   onDownload,
+  onToggleFavorite,
 }: {
   item: MediaCard;
   busy: boolean;
+  favorited: boolean;
   onOpen: () => void;
   onDownload: () => void;
+  onToggleFavorite: () => void;
 }) {
   const dur = formatDuration(item.durationSec);
   const w = item.width && item.width > 0 ? item.width : 3;
@@ -766,6 +878,8 @@ function VisualCard({
           </div>
         )}
 
+        <FavHeart active={favorited} onToggle={onToggleFavorite} />
+
         <CardMenuSlot>
           <CardMenu
             items={[
@@ -797,18 +911,22 @@ function MusicCard({
   item,
   playing,
   busy,
+  favorited,
   progress,
   onPlay,
   onSeek,
   onDownload,
+  onToggleFavorite,
 }: {
   item: MediaCard;
   playing: boolean;
   busy: boolean;
+  favorited: boolean;
   progress: { current: number; duration: number };
   onPlay: () => void;
   onSeek: (seconds: number) => void;
   onDownload: () => void;
+  onToggleFavorite: () => void;
 }) {
   const total =
     progress.duration > 0
@@ -836,6 +954,8 @@ function MusicCard({
             ♪
           </div>
         )}
+
+        <FavHeart active={favorited} onToggle={onToggleFavorite} />
 
         <CardMenuSlot>
           <CardMenu

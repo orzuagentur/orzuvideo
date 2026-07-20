@@ -17,12 +17,17 @@ type VoiceItem = {
 
 type GenderFilter = "all" | "male" | "female" | "neutral";
 
+/** Empty string = Auto (AI picks) when allowAuto is true */
 export function VoicePicker({
   value,
   onChange,
+  hideSearch = false,
+  allowAuto = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  hideSearch?: boolean;
+  allowAuto?: boolean;
 }) {
   const { show: toast, notice } = useToast();
   const [voices, setVoices] = useState<VoiceItem[]>([]);
@@ -34,28 +39,30 @@ export function VoicePicker({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async (search: string, g: GenderFilter) => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (search.trim()) params.set("q", search.trim());
-      if (g !== "all") params.set("gender", g);
-      const res = await fetch(`/api/elevenlabs/voices?${params}`);
-      const data = await res.json();
-      if (!res.ok) {
-        toast(data.error || "Failed to load voices", "error");
+  const load = useCallback(
+    async (search: string, g: GenderFilter) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (search.trim()) params.set("q", search.trim());
+        if (g !== "all") params.set("gender", g);
+        const res = await fetch(`/api/elevenlabs/voices?${params}`);
+        const data = await res.json();
+        if (!res.ok) {
+          toast(data.error || "Failed to load voices", "error");
+          setVoices([]);
+          return;
+        }
+        setVoices((data.voices || []) as VoiceItem[]);
+      } catch {
+        toast("Network error while loading voices", "error");
         setVoices([]);
-        return;
+      } finally {
+        setLoading(false);
       }
-      const list = (data.voices || []) as VoiceItem[];
-      setVoices(list);
-    } catch {
-      toast("Network error while loading voices", "error");
-      setVoices([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+    },
+    [toast],
+  );
 
   useEffect(() => {
     void load("", "all");
@@ -65,11 +72,12 @@ export function VoicePicker({
     };
   }, [load]);
 
-  // Auto-select first voice only when empty and list arrives
+  // Auto-select first voice only when Auto mode is off
   useEffect(() => {
+    if (allowAuto) return;
     if (!value && voices[0]) onChange(voices[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [voices]);
+  }, [voices, allowAuto]);
 
   function onSearchChange(next: string) {
     setQ(next);
@@ -140,44 +148,80 @@ export function VoicePicker({
     { id: "neutral", label: "Neutral" },
   ];
 
+  const autoOn = allowAuto && !value;
+
   return (
     <div className="space-y-3">
       {notice}
-      <input
-        className="field w-full text-sm"
-        placeholder="Search voice"
-        value={q}
-        onChange={(e) => onSearchChange(e.target.value)}
-      />
+      {!hideSearch && (
+        <>
+          <input
+            className="field w-full text-sm"
+            placeholder="Search voice"
+            value={q}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
 
-      <div className="flex flex-wrap gap-1.5">
-        {filters.map((f) => {
-          const on = gender === f.id;
-          return (
-            <button
-              key={f.id}
-              type="button"
-              onClick={() => onGenderChange(f.id)}
-              className="rounded-full border px-3 py-1 text-xs transition"
-              style={{
-                borderColor: on ? "rgba(232,165,75,0.55)" : "var(--line)",
-                background: on ? "rgba(232,165,75,0.14)" : "transparent",
-                color: on ? "var(--accent)" : "var(--muted)",
-              }}
-            >
-              {f.label}
-            </button>
-          );
-        })}
-      </div>
+          <div className="flex flex-wrap gap-1.5">
+            {filters.map((f) => {
+              const on = gender === f.id;
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => onGenderChange(f.id)}
+                  className="rounded-full border px-3 py-1 text-xs transition"
+                  style={{
+                    borderColor: on ? "rgba(232,165,75,0.55)" : "var(--line)",
+                    background: on ? "rgba(232,165,75,0.14)" : "transparent",
+                    color: on ? "var(--accent)" : "var(--muted)",
+                  }}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {!loading && voices.length === 0 && (
         <p className="text-sm text-[color:var(--muted)]">
-          No voices found. Change the filter or search.
+          No voices found
+          {!hideSearch ? ". Change the filter or search." : "."}
         </p>
       )}
 
-      <div className="max-h-[360px] space-y-1.5 overflow-y-auto rounded-xl border border-[color:var(--line)] p-2">
+      <div className="max-h-[320px] space-y-1.5 overflow-y-auto rounded-xl border border-[color:var(--line)] p-2">
+        {allowAuto && (
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition"
+            style={{
+              background: autoOn ? "rgba(232,165,75,0.12)" : "transparent",
+              border: `1px solid ${
+                autoOn ? "rgba(232,165,75,0.45)" : "transparent"
+              }`,
+            }}
+            onClick={() => onChange("")}
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-xs">
+              ✦
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-medium">Auto</span>
+              <span className="block text-[11px] text-[color:var(--muted)]">
+                AI picks a voice
+              </span>
+            </span>
+            {autoOn && (
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                ✓
+              </span>
+            )}
+          </button>
+        )}
+
         {voices.map((v) => {
           const isSelected = value === v.id;
           const playing = playingId === v.id;

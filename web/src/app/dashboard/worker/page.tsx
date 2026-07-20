@@ -1,5 +1,6 @@
-import { WorkerStudio } from "@/components/WorkerStudio";
+import { redirect } from "next/navigation";
 
-export default function WorkerPage() {
-  return <WorkerStudio />;
+/** Legacy Worker route → Favorites */
+export default function WorkerRedirect() {
+  redirect("/dashboard/favorites");
 }
