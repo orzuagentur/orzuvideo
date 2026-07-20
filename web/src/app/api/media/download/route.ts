@@ -58,7 +58,7 @@ export async function GET(request: Request) {
     const upstream = await fetch(fileUrl, {
       redirect: "follow",
       cache: "no-store",
-      headers: { "User-Agent": "OrzuVideo/1.0" },
+      headers: { "User-Agent": "OrzuAi/1.0" },
     });
     if (!upstream.ok || !upstream.body) {
       return NextResponse.json(

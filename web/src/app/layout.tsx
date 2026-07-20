@@ -15,9 +15,9 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "OrzuVideo — AI YouTube Shorts",
+  title: "OrzuAi — AI YouTube Shorts",
   description:
-    "Train once. OrzuVideo creates and publishes two Shorts every day.",
+    "Train once. OrzuAi creates and publishes two Shorts every day.",
 };
 
 export default function RootLayout({

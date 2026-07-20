@@ -49,7 +49,7 @@ const DEFAULT_TIMES = [
 ];
 
 export const scheduleDefaults: PublishSchedule = {
-  enabled: false,
+  enabled: true,
   mode: "daily",
   videos_per_day: 2,
   times: ["09:00", "18:00"],
@@ -141,126 +141,106 @@ export function ScheduleStudio({
 
   return (
     <section className="panel rise space-y-3 p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div>
         <p className="text-sm font-semibold">Publish schedule</p>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={value.enabled}
-          onClick={() => patch({ enabled: !value.enabled })}
-          className="relative h-7 w-12 shrink-0 rounded-full transition"
-          style={{
-            background: value.enabled
-              ? "rgba(232,165,75,0.85)"
-              : "rgba(255,255,255,0.12)",
-          }}
-        >
-          <span
-            className="absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition"
-            style={{ left: value.enabled ? "1.4rem" : "0.2rem" }}
-          />
-        </button>
+        <p className="mt-0.5 text-xs text-[color:var(--muted)]">
+          When to post. Turn AI content on/off from the Channel page.
+        </p>
       </div>
 
-      {value.enabled && (
-        <div className="space-y-3 border-t border-[color:var(--line)] pt-3">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <ScheduleSelectField
-              label="Mode"
-              value={value.mode}
-              options={MODE_OPTIONS}
-              onChange={(v) =>
-                patch({ mode: v as PublishSchedule["mode"] })
-              }
-              allowOwn
-              ownPlaceholder="Custom mode id"
-            />
-            <ScheduleSelectField
-              label="Videos / day"
-              value={String(value.videos_per_day)}
-              options={videoOptions}
-              onChange={(v) =>
-                patch({
-                  videos_per_day: Math.min(10, Math.max(1, Number(v) || 1)),
-                })
-              }
-              allowOwn
-              ownKind="number"
-              ownPlaceholder="1–10"
-            />
-            <ScheduleSelectField
-              label="Timezone"
-              value={value.timezone}
-              options={tzOptions}
-              onChange={(v) => patch({ timezone: v })}
-              allowOwn
-              ownPlaceholder="Europe/Berlin"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-medium text-[color:var(--muted)]">
-              Times
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {padScheduleTimes(value.videos_per_day, value.times || []).map(
-                (t, i) => (
-                  <TimeChip
-                    key={i}
-                    label={`#${i + 1}`}
-                    value={t}
-                    onChange={(v) => setTimeAt(i, v)}
-                  />
-                ),
-              )}
-            </div>
-          </div>
-
-          {(value.mode === "custom_days" || value.mode === "weekdays") && (
-            <div className="flex flex-wrap gap-1">
-              {DAY_LABELS.map((d) => {
-                const on = value.weekdays.includes(d.id);
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => toggleDay(d.id)}
-                    className="rounded-md px-2 py-1 text-xs"
-                    style={{
-                      background: on
-                        ? "rgba(232,165,75,0.16)"
-                        : "transparent",
-                      border: `1px solid ${
-                        on ? "rgba(232,165,75,0.5)" : "var(--line)"
-                      }`,
-                      color: on ? "var(--accent)" : "var(--muted)",
-                    }}
-                  >
-                    {d.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {value.mode === "dates" && (
-            <input
-              className="field !py-2 text-sm"
-              value={datesText}
-              onChange={(e) => {
-                setDatesText(e.target.value);
-                patch({
-                  custom_dates: e.target.value
-                    .split(",")
-                    .map((t) => t.trim())
-                    .filter(Boolean),
-                });
-              }}
-              placeholder="Dates: 2026-07-20, 2026-07-25"
-            />
-          )}
+      <div className="space-y-3 border-t border-[color:var(--line)] pt-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <ScheduleSelectField
+            label="Mode"
+            value={value.mode}
+            options={MODE_OPTIONS}
+            onChange={(v) => patch({ mode: v as PublishSchedule["mode"] })}
+            allowOwn
+            ownPlaceholder="Custom mode id"
+          />
+          <ScheduleSelectField
+            label="Videos / day"
+            value={String(value.videos_per_day)}
+            options={videoOptions}
+            onChange={(v) =>
+              patch({
+                videos_per_day: Math.min(10, Math.max(1, Number(v) || 1)),
+              })
+            }
+            allowOwn
+            ownKind="number"
+            ownPlaceholder="1–10"
+          />
+          <ScheduleSelectField
+            label="Timezone"
+            value={value.timezone}
+            options={tzOptions}
+            onChange={(v) => patch({ timezone: v })}
+            allowOwn
+            ownPlaceholder="Europe/Berlin"
+          />
         </div>
-      )}
+
+        <div className="space-y-1.5">
+          <span className="text-[11px] font-medium text-[color:var(--muted)]">
+            Times
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {padScheduleTimes(value.videos_per_day, value.times || []).map(
+              (t, i) => (
+                <TimeChip
+                  key={i}
+                  label={`#${i + 1}`}
+                  value={t}
+                  onChange={(v) => setTimeAt(i, v)}
+                />
+              ),
+            )}
+          </div>
+        </div>
+
+        {(value.mode === "custom_days" || value.mode === "weekdays") && (
+          <div className="flex flex-wrap gap-1">
+            {DAY_LABELS.map((d) => {
+              const on = value.weekdays.includes(d.id);
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => toggleDay(d.id)}
+                  className="rounded-md px-2 py-1 text-xs"
+                  style={{
+                    background: on ? "rgba(232,165,75,0.16)" : "transparent",
+                    border: `1px solid ${
+                      on ? "rgba(232,165,75,0.5)" : "var(--line)"
+                    }`,
+                    color: on ? "var(--accent)" : "var(--muted)",
+                  }}
+                >
+                  {d.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {value.mode === "dates" && (
+          <input
+            className="field !py-2 text-sm"
+            value={datesText}
+            onChange={(e) => {
+              setDatesText(e.target.value);
+              patch({
+                custom_dates: e.target.value
+                  .split(",")
+                  .map((t) => t.trim())
+                  .filter(Boolean),
+              });
+            }}
+            placeholder="Dates: 2026-07-20, 2026-07-25"
+          />
+        )}
+      </div>
     </section>
   );
 }

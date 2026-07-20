@@ -29,8 +29,11 @@ export async function DELETE(_request: Request, { params }: Params) {
   }
 
   const meta = (job.metadata || {}) as { source?: string; publish?: boolean };
+  const src = String(meta.source || "").toLowerCase();
   const isPlatform =
-    meta.source === "creativity" ||
+    src === "creativity" ||
+    src === "ai_clipping" ||
+    src === "clipping" ||
     (meta.publish === false && !job.youtube_video_id);
   if (!isPlatform) {
     return NextResponse.json(

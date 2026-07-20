@@ -7,12 +7,21 @@ import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
 
 type YtComment = {
   id: string;
+  commentId?: string;
   author: string;
   avatar: string | null;
   text: string;
   likes: number;
   publishedAt: string | null;
   replyCount: number;
+  ourReply?: string | null;
+  repliedByUs?: boolean;
+  replies?: Array<{
+    id: string;
+    author: string;
+    text: string;
+    publishedAt?: string | null;
+  }>;
 };
 
 function thumbUrl(job: VideoJob) {
@@ -29,6 +38,21 @@ function formatCount(n: number | null | undefined) {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
   return String(Math.round(v));
+}
+
+function formatDurationLabel(sec: number | null | undefined) {
+  const s = Number(sec ?? 0);
+  if (!Number.isFinite(s) || s <= 0) return null;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  return r > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${m}m`;
+}
+
+function kindLabel(sec: number | null | undefined) {
+  const s = Number(sec ?? 0);
+  if (!Number.isFinite(s) || s <= 0) return null;
+  return s <= 60 ? "Short" : "Video";
 }
 
 export function YouTubeVideoCards({
@@ -181,10 +205,21 @@ export function YouTubeVideoCards({
                   >
                     {JOB_STATUS_LABEL[job.status] || job.status}
                   </span>
+                  {(kindLabel(job.duration_seconds) ||
+                    formatDurationLabel(job.duration_seconds)) && (
+                    <span className="absolute bottom-2 right-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] font-medium text-white">
+                      {[
+                        kindLabel(job.duration_seconds),
+                        formatDurationLabel(job.duration_seconds),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-2 p-3">
                   <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug">
-                    {job.title || "Untitled Short"}
+                    {job.title || "Untitled"}
                   </h3>
                   <div className="grid grid-cols-3 gap-1 text-center text-[11px] text-[color:var(--muted)]">
                     <div className="rounded-md bg-black/20 px-1 py-1.5">
@@ -259,6 +294,9 @@ function VideoDetailModal({
   const [comments, setComments] = useState<YtComment[]>([]);
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState<Record<string, string>>({});
+  const [busyComment, setBusyComment] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const loadComments = useCallback(async () => {
     if (!job.youtube_video_id) {
@@ -284,6 +322,43 @@ function VideoDetailModal({
       setLoadingComments(false);
     }
   }, [job.youtube_video_id]);
+
+  async function sendReply(c: YtComment, mode: "manual" | "ai") {
+    const commentId = c.commentId || c.id;
+    if (!job.youtube_video_id || !commentId) return;
+    const text = (replyDraft[commentId] || "").trim();
+    if (mode === "manual" && text.length < 1) {
+      setActionError("Write a reply first.");
+      return;
+    }
+    setBusyComment(`${commentId}:${mode}`);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/youtube/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          videoId: job.youtube_video_id,
+          commentId,
+          mode,
+          text,
+          author: c.author,
+          commentText: c.text,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || "Failed to reply");
+        return;
+      }
+      setReplyDraft((prev) => ({ ...prev, [commentId]: "" }));
+      await loadComments();
+    } catch {
+      setActionError("Failed to reply");
+    } finally {
+      setBusyComment(null);
+    }
+  }
 
   useEffect(() => {
     void loadComments();
@@ -345,7 +420,7 @@ function VideoDetailModal({
               </div>
             ) : (
               <div className="rounded-xl border border-[color:var(--line)] p-6 text-sm text-[color:var(--muted)]">
-                Preview available after the worker finishes. Status:{" "}
+                Preview available after generation finishes. Status:{" "}
                 {JOB_STATUS_LABEL[job.status] || job.status}
               </div>
             )}
@@ -411,7 +486,7 @@ function VideoDetailModal({
 
             {!job.youtube_video_id ? (
               <p className="text-sm text-[color:var(--muted)]">
-                Comments appear after the Short is published.
+                Comments appear after the video is published.
               </p>
             ) : commentError ? (
               <p className="text-sm text-[color:var(--danger)]">{commentError}</p>
@@ -420,36 +495,100 @@ function VideoDetailModal({
             ) : comments.length === 0 ? (
               <p className="text-sm text-[color:var(--muted)]">No comments yet.</p>
             ) : (
-              <ul className="space-y-3 overflow-auto pr-1">
-                {comments.map((c) => (
-                  <li key={c.id} className="flex gap-3">
-                    {c.avatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={c.avatar}
-                        alt=""
-                        className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[10px]">
-                        YT
+              <ul className="space-y-4 overflow-auto pr-1">
+                {actionError && (
+                  <li className="text-xs text-[color:var(--danger)]">{actionError}</li>
+                )}
+                {comments.map((c) => {
+                  const cid = c.commentId || c.id;
+                  const busy = busyComment?.startsWith(cid);
+                  return (
+                    <li key={c.id} className="flex gap-3">
+                      {c.avatar ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={c.avatar}
+                          alt=""
+                          className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover"
+                        />
+                      ) : (
+                        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-[10px]">
+                          YT
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div>
+                          <p className="text-xs text-[color:var(--muted)]">
+                            <span className="font-medium text-[color:var(--fg)]">
+                              {c.author}
+                            </span>
+                            {c.publishedAt
+                              ? ` · ${formatFixedDate(c.publishedAt)}`
+                              : ""}
+                            {c.repliedByUs ? " · Replied" : ""}
+                          </p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm leading-snug">
+                            {c.text}
+                          </p>
+                          <p className="mt-1 text-[11px] text-[color:var(--muted)]">
+                            {c.likes} likes
+                            {c.replyCount ? ` · ${c.replyCount} replies` : ""}
+                          </p>
+                        </div>
+
+                        {c.ourReply && (
+                          <div className="rounded-lg border border-[color:var(--line)] bg-black/20 px-2.5 py-2">
+                            <p className="text-[10px] uppercase tracking-wide text-[color:var(--muted)]">
+                              Your reply
+                            </p>
+                            <p className="mt-0.5 whitespace-pre-wrap text-sm">
+                              {c.ourReply}
+                            </p>
+                          </div>
+                        )}
+
+                        {!c.repliedByUs && (
+                          <div className="space-y-1.5">
+                            <textarea
+                              className="field min-h-[56px] w-full text-sm"
+                              placeholder="Write a reply..."
+                              value={replyDraft[cid] || ""}
+                              disabled={Boolean(busy)}
+                              onChange={(e) =>
+                                setReplyDraft((prev) => ({
+                                  ...prev,
+                                  [cid]: e.target.value,
+                                }))
+                              }
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="btn btn-primary text-xs"
+                                disabled={Boolean(busy)}
+                                onClick={() => void sendReply(c, "manual")}
+                              >
+                                {busyComment === `${cid}:manual`
+                                  ? "Sending..."
+                                  : "Reply"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost text-xs"
+                                disabled={Boolean(busy)}
+                                onClick={() => void sendReply(c, "ai")}
+                              >
+                                {busyComment === `${cid}:ai`
+                                  ? "AI writing..."
+                                  : "AI reply"}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-[color:var(--muted)]">
-                        <span className="font-medium text-[color:var(--fg)]">{c.author}</span>
-                        {c.publishedAt
-                          ? ` · ${formatFixedDate(c.publishedAt)}`
-                          : ""}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm leading-snug">{c.text}</p>
-                      <p className="mt-1 text-[11px] text-[color:var(--muted)]">
-                        {c.likes} likes
-                        {c.replyCount ? ` · ${c.replyCount} replies` : ""}
-                      </p>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>

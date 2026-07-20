@@ -18,11 +18,84 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const enabled = Boolean(body.enabled);
+
+  const { data: existing } = await supabase
+    .from("publish_schedules")
+    .select("*")
+    .eq("user_id", user.id)
+    .eq("youtube_channel_id", active.channel_id)
+    .maybeSingle();
+
+  // Lightweight toggle from Channel "AI content" switch
+  const onlyToggle =
+    typeof body.enabled === "boolean" &&
+    body.times === undefined &&
+    body.mode === undefined &&
+    body.videos_per_day === undefined &&
+    body.timezone === undefined;
+
+  if (onlyToggle) {
+    if (body.enabled === true) {
+      const { data: training } = await supabase
+        .from("ai_training")
+        .select("is_trained")
+        .eq("user_id", user.id)
+        .eq("youtube_channel_id", active.channel_id)
+        .maybeSingle();
+      if (!training?.is_trained) {
+        return NextResponse.json(
+          {
+            error: "complete_training",
+            message: "Configure AI Training first",
+            redirect: "/dashboard/channel/training?enableAi=1",
+          },
+          { status: 400 },
+        );
+      }
+    }
+
+    const enabled = Boolean(body.enabled);
+    if (existing?.id) {
+      const { error } = await supabase
+        .from("publish_schedules")
+        .update({ enabled })
+        .eq("id", existing.id);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    } else if (enabled) {
+      const { error } = await supabase.from("publish_schedules").insert({
+        user_id: user.id,
+        youtube_channel_id: active.channel_id,
+        enabled: true,
+        mode: "daily",
+        videos_per_day: 2,
+        times: ["09:00", "18:00"],
+        weekdays: [1, 2, 3, 4, 5, 6, 7],
+        custom_dates: [],
+        timezone: "Europe/Berlin",
+      });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    }
+
+    await supabase
+      .from("profiles")
+      .update({ daily_videos_enabled: enabled })
+      .eq("id", user.id);
+
+    return NextResponse.json({ ok: true, enabled });
+  }
+
+  const enabled = body.enabled !== undefined ? Boolean(body.enabled) : true;
   const times: string[] = Array.isArray(body.times)
     ? body.times.map((t: unknown) => String(t))
-    : ["09:00", "18:00"];
-  const videos_per_day = Math.min(10, Math.max(1, Number(body.videos_per_day) || 2));
+    : existing?.times || ["09:00", "18:00"];
+  const videos_per_day = Math.min(
+    10,
+    Math.max(1, Number(body.videos_per_day) || existing?.videos_per_day || 2),
+  );
   let normalizedTimes: string[] = times
     .map((t: string) => {
       const [h, m] = String(t).trim().split(":");
@@ -32,69 +105,43 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .slice(0, videos_per_day);
 
-  // Pad when schedule is off so we can still persist the toggle
   while (normalizedTimes.length < videos_per_day) {
     const fallback = ["09:00", "14:00", "18:00", "20:00", "12:00"][
       normalizedTimes.length
     ] || "12:00";
     if (!normalizedTimes.includes(fallback)) normalizedTimes.push(fallback);
-    else normalizedTimes.push(`${String(8 + normalizedTimes.length).padStart(2, "0")}:00`);
+    else
+      normalizedTimes.push(
+        `${String(8 + normalizedTimes.length).padStart(2, "0")}:00`,
+      );
   }
 
-  if (enabled) {
-    if (normalizedTimes.length < videos_per_day) {
-      return NextResponse.json(
-        {
-          error: `Set ${videos_per_day} distinct times (one per video per day).`,
-        },
-        { status: 400 },
-      );
-    }
-    if (new Set(normalizedTimes).size !== normalizedTimes.length) {
-      return NextResponse.json(
-        { error: "Each video needs a different time of day." },
-        { status: 400 },
-      );
-    }
-  } else {
-    // ensure unique when disabled too
-    const seen = new Set<string>();
-    normalizedTimes = normalizedTimes.map((t: string, i: number) => {
-      let cur = t;
-      while (seen.has(cur)) {
-        cur = `${String((8 + i) % 24).padStart(2, "0")}:00`;
-      }
-      seen.add(cur);
-      return cur;
-    });
+  if (new Set(normalizedTimes).size !== normalizedTimes.length) {
+    return NextResponse.json(
+      { error: "Each video needs a different time of day." },
+      { status: 400 },
+    );
   }
 
   const payload = {
     user_id: user.id,
     youtube_channel_id: active.channel_id,
     enabled,
-    mode: String(body.mode || "daily"),
+    mode: String(body.mode || existing?.mode || "daily"),
     videos_per_day,
     times: normalizedTimes,
     weekdays: Array.isArray(body.weekdays)
       ? body.weekdays.map(Number)
-      : [1, 2, 3, 4, 5, 6, 7],
+      : existing?.weekdays || [1, 2, 3, 4, 5, 6, 7],
     custom_dates: Array.isArray(body.custom_dates)
       ? body.custom_dates.map(String)
-      : [],
-    timezone: String(body.timezone || "Europe/Berlin"),
+      : existing?.custom_dates || [],
+    timezone: String(body.timezone || existing?.timezone || "Europe/Berlin"),
   };
 
   if (!["daily", "weekdays", "custom_days", "dates"].includes(payload.mode)) {
     return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
   }
-
-  const { data: existing } = await supabase
-    .from("publish_schedules")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("youtube_channel_id", active.channel_id)
-    .maybeSingle();
 
   let error;
   if (existing?.id) {

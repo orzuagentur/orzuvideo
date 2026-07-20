@@ -1,4 +1,4 @@
-/** Static n8n-style map of OrzuVideo pipeline nodes + explanations. */
+/** Static n8n-style map of OrzuAi pipeline nodes + explanations. */
 
 export type NodeKind =
   | "trigger"

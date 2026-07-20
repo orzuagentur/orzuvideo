@@ -20,13 +20,13 @@ export function CostsStudio({
       <header className="rise">
         <h1 className="text-2xl font-semibold">Costs</h1>
         <p className="mt-1 text-sm text-[color:var(--muted)]">
-          Real usage from ChatGPT, ElevenLabs and YouTube operations.
+          Usage from AI scripts, voice, and YouTube operations.
         </p>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Card title="OpenAI / ChatGPT" cost={totals.openai.cost} units={`${Math.round(totals.openai.units)} tokens`} />
-        <Card title="ElevenLabs" cost={totals.elevenlabs.cost} units={`${Math.round(totals.elevenlabs.units)} chars`} />
+        <Card title="Scripts (AI)" cost={totals.openai.cost} units={`${Math.round(totals.openai.units)} tokens`} />
+        <Card title="Voice" cost={totals.elevenlabs.cost} units={`${Math.round(totals.elevenlabs.units)} chars`} />
         <Card title="YouTube ops" cost={totals.youtube.cost} units={`${Math.round(totals.youtube.units)} actions`} />
         <Card title="Total" cost={totals.all} units="this month" highlight />
       </section>
@@ -38,7 +38,7 @@ export function CostsStudio({
         <ul className="divide-y divide-[color:var(--line)]">
           {events.length === 0 && (
             <li className="p-6 text-sm text-[color:var(--muted)]">
-              No usage yet. Costs appear when the worker generates videos.
+              No usage yet. Costs appear when videos are generated.
             </li>
           )}
           {events.map((e) => (

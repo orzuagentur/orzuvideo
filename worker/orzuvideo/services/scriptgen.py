@@ -9,24 +9,29 @@ from orzuvideo.config import settings
 from orzuvideo.services.usage import estimate_openai_cost, log_usage
 
 
-SYSTEM_PROMPT = """You are an elite YouTube Shorts scriptwriter and creative director.
-Write ultra-viral vertical Shorts scripts for motivational / niche content.
+SYSTEM_PROMPT = """You are an elite YouTube scriptwriter and creative director.
+Write a {content_kind} that STRICTLY follows the user's AI Training settings below.
 Rules:
 - Spoken duration target: {duration} seconds (about {word_count} words).
-- Language: {language}
-- Format: {video_format} / style: {video_style}
-- CRITICAL HOOK: the first 3 seconds MUST stop the scroll.
-  The "hook" field must be a punchy 4–10 word pattern interrupt (question, shock claim, or challenge).
-  The spoken script MUST start with that hook in the first breath (spoken in under 3 seconds).
-- After the hook: short punchy sentences. No fluff.
-- End with a soft CTA if provided.
-- Respect brand rules.
+- LANGUAGE CODE: {language}
+  HARD RULE: write hook, script, title, description, tags, CTA wording ENTIRELY in this language.
+  If any training field (CTA, hook style, style notes) is in another language, TRANSLATE it into {language}.
+  Never leave English CTA/hook/title when language is not "en".
+- Format: {video_format}{video_style_line}
+- Aspect / framing: {aspect_hint}
+- CRITICAL OPENING: the first few seconds MUST grab attention.
+  The "hook" field must be a punchy pattern interrupt in {language}.
+  The spoken script MUST start with that hook.
+- After the hook: {pacing_hint}
+- Use ONLY the training fields provided. Do NOT invent niche/style/tone/content-type
+  that the user did not set. Do NOT default to motivational/discipline content
+  unless niche/style explicitly says so.
 - Return STRICT JSON only, no markdown.
 JSON schema:
 {{
-  "hook": "4-10 word scroll-stopper for first 3 seconds",
+  "hook": "attention-grabbing opening line",
   "script": "full spoken narration STARTING with the hook",
-  "title": "YouTube Shorts title under 70 chars",
+  "title": "YouTube title under 70 chars",
   "description": "YouTube description with hashtags",
   "tags": ["tag1", "tag2"],
   "pexels_queries": ["query1", "query2", "query3", "query4", "query5"],
@@ -34,34 +39,89 @@ JSON schema:
 }}
 """
 
-SYSTEM_PROMPT_AUTO = """You are an elite YouTube Shorts scriptwriter and creative director.
-Write ultra-viral vertical Shorts scripts for motivational / niche content.
+SYSTEM_PROMPT_AUTO = """You are an elite YouTube scriptwriter and creative director.
+Write a {content_kind} that STRICTLY follows the user's AI Training settings below.
 Rules:
-- Choose the ideal spoken duration yourself between 15 and 60 seconds based on the user brief
+- Choose the ideal spoken duration yourself between {min_duration} and {max_duration} seconds based on the topic
   (simple idea → shorter; richer story → longer). Do NOT force a fixed length.
-- Put your chosen length in "duration_seconds" (integer 15–60).
+- Put your chosen length in "duration_seconds" (integer {min_duration}–{max_duration}).
 - Aim for about 2.4 words per second of speech.
-- Language: {language}
-- Format: {video_format} / style: {video_style}
-- CRITICAL HOOK: the first 3 seconds MUST stop the scroll.
-  The "hook" field must be a punchy 4–10 word pattern interrupt (question, shock claim, or challenge).
-  The spoken script MUST start with that hook in the first breath (spoken in under 3 seconds).
-- After the hook: short punchy sentences. No fluff.
-- End with a soft CTA if provided.
-- Respect brand rules.
+- LANGUAGE CODE: {language}
+  HARD RULE: write hook, script, title, description, tags, CTA wording ENTIRELY in this language.
+  If any training field (CTA, hook style, style notes) is in another language, TRANSLATE it into {language}.
+  Never leave English CTA/hook/title when language is not "en".
+- Format: {video_format}{video_style_line}
+- Aspect / framing: {aspect_hint}
+- CRITICAL OPENING: the first few seconds MUST grab attention.
+  The "hook" field must be a punchy pattern interrupt in {language}.
+  The spoken script MUST start with that hook.
+- After the hook: {pacing_hint}
+- Use ONLY the training fields provided. Do NOT invent niche/style/tone/content-type
+  that the user did not set. Do NOT default to motivational/discipline content
+  unless niche/style explicitly says so.
 - Return STRICT JSON only, no markdown.
 JSON schema:
 {{
-  "duration_seconds": 30,
-  "hook": "4-10 word scroll-stopper for first 3 seconds",
+  "duration_seconds": {default_duration},
+  "hook": "attention-grabbing opening line",
   "script": "full spoken narration STARTING with the hook",
-  "title": "YouTube Shorts title under 70 chars",
+  "title": "YouTube title under 70 chars",
   "description": "YouTube description with hashtags",
   "tags": ["tag1", "tag2"],
   "pexels_queries": ["query1", "query2", "query3", "query4", "query5"],
   "subtitle_emphasis": ["WORD1", "WORD2"]
 }}
 """
+
+
+def _format_profile(video_format: str) -> dict[str, Any]:
+    """Map AI Training format → aspect, duration bounds, writing style hints."""
+    fmt = (video_format or "shorts").strip().lower()
+    if fmt in ("video", "long", "longform", "youtube_video"):
+        return {
+            "content_kind": "horizontal YouTube video (16:9, long-form)",
+            "aspect": "16:9",
+            "min_duration": 90,
+            "max_duration": 600,
+            "default_duration": 180,
+            "aspect_hint": "Landscape 16:9 — cinematic B-roll, not vertical Shorts.",
+            "pacing_hint": (
+                "Develop a clear structure (intro → points/story → payoff). "
+                "Use fuller sentences; still keep energy and clarity."
+            ),
+            "is_short": False,
+            "default_tags": ["youtube"],
+            "hashtag_suffix": "",
+        }
+    if fmt in ("simple", "simple_video"):
+        return {
+            "content_kind": "simple horizontal YouTube video (16:9)",
+            "aspect": "16:9",
+            "min_duration": 60,
+            "max_duration": 300,
+            "default_duration": 120,
+            "aspect_hint": "Landscape 16:9 — clean, simple edit suitable for YouTube.",
+            "pacing_hint": (
+                "Keep structure simple: hook, 2–4 clear points, soft close. "
+                "Easy to follow; no overcomplicated storytelling."
+            ),
+            "is_short": False,
+            "default_tags": ["youtube"],
+            "hashtag_suffix": "",
+        }
+    # shorts + legacy mixer / reel-style values
+    return {
+        "content_kind": "vertical YouTube Short (9:16)",
+        "aspect": "9:16",
+        "min_duration": 15,
+        "max_duration": 60,
+        "default_duration": 45,
+        "aspect_hint": "Vertical 9:16 Shorts — mobile-first, scroll-stopping.",
+        "pacing_hint": "Use short punchy sentences. No fluff.",
+        "is_short": True,
+        "default_tags": ["shorts"],
+        "hashtag_suffix": "\n\n#Shorts",
+    }
 
 # Platform Creativity — independent of YouTube AI Training
 CREATIVITY_SYSTEM = """You are a professional short-form video creative director for an in-app video studio.
@@ -126,6 +186,39 @@ def _log_openai_usage(
             "model": settings.openai_model,
         },
     )
+
+
+def _filled(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _training_lines(training: dict[str, Any]) -> str:
+    """Build prompt lines only from non-empty training fields."""
+    mapping = [
+        ("Niche", "niche"),
+        ("Content type", "content_type"),
+        ("Tone", "tone"),
+        ("Target audience", "target_audience"),
+        ("Hook style", "hook_style"),
+        ("CTA (translate into language if needed)", "cta"),
+        ("Brand rules", "brand_rules"),
+        ("Brand / style instructions", "style_prompt"),
+        ("Default Pexels vibe", "pexels_query"),
+        ("Music mood", "music_mood"),
+    ]
+    lines: list[str] = []
+    for label, key in mapping:
+        val = _filled(training.get(key))
+        if not val:
+            continue
+        if key == "style_prompt":
+            lines.append(f'{label}:\n"""{val}"""')
+        else:
+            lines.append(f"{label}: {val}")
+    return "\n".join(lines) if lines else "Niche: (follow style_prompt only)"
 
 
 def generate_creativity_script(
@@ -200,33 +293,30 @@ Hard requirements:
     if (
         not title
         or title_l == prompt_l
-        or (len(prompt_l) > 20 and title_l == prompt_l[: len(title_l)])
+        or prompt_l.startswith(title_l)
+        or title_l.startswith(prompt_l[:40])
     ):
-        hook = (data.get("hook") or "").strip()
-        title = (hook[:60] if hook else script.split(".")[0][:60]).strip() or "Untitled video"
-    title = title[:70]
-
-    try:
-        chosen = max(15, min(60, int(data.get("duration_seconds") or duration_seconds or 30)))
-    except (TypeError, ValueError):
-        chosen = duration_seconds or 30
+        title = (data.get("hook") or "New video")[:60]
 
     language = (data.get("language") or "en").strip().lower()[:8] or "en"
-    music_mood = (data.get("music_mood") or "cinematic emotional").strip()
-
-    return {
-        "language": language,
+    result: dict[str, Any] = {
         "hook": data.get("hook") or script.split(".")[0],
         "script": script,
-        "title": title,
-        "description": data.get("description") or title,
-        "tags": data.get("tags") or ["video"],
+        "title": title[:90],
+        "description": data.get("description") or script[:180],
+        "tags": data.get("tags") or ["shorts"],
         "pexels_queries": data.get("pexels_queries")
-        or ["cinematic lifestyle", "city lights", "nature aerial"],
+        or ["cinematic b-roll"],
         "subtitle_emphasis": data.get("subtitle_emphasis") or [],
-        "music_mood": music_mood,
-        "duration_seconds": chosen,
+        "language": language,
+        "music_mood": data.get("music_mood"),
     }
+    if data.get("duration_seconds") is not None:
+        try:
+            result["duration_seconds"] = max(15, min(60, int(data["duration_seconds"])))
+        except (TypeError, ValueError):
+            pass
+    return result
 
 
 def generate_script(
@@ -240,15 +330,26 @@ def generate_script(
     """YouTube / AI-Training path — uses channel training settings."""
     client = OpenAI(api_key=settings.openai_api_key)
     duration_auto = bool(training.get("duration_auto"))
-    duration = int(training.get("duration_seconds") or 45)
+    video_format = _filled(training.get("video_format")) or "shorts"
+    profile = _format_profile(video_format)
+    min_d = int(profile["min_duration"])
+    max_d = int(profile["max_duration"])
+    raw_duration = int(training.get("duration_seconds") or profile["default_duration"])
+    duration = max(min_d, min(max_d, raw_duration))
     word_count = max(40, int(duration * 2.4))
+    language = _filled(training.get("language")) or "en"
+    video_style = _filled(training.get("video_style"))
+    video_style_line = f" / style: {video_style}" if video_style else ""
 
     brief_block = ""
     if user_brief and user_brief.strip():
+        kind = "Short" if profile["is_short"] else "video"
         brief_block = f"""
-USER BRIEF FOR THIS VIDEO (highest priority — build the Short around this):
+USER TOPIC / IDEA FOR THIS VIDEO (topic only — NOT style instructions):
 \"\"\"{user_brief.strip()}\"\"\"
-Follow this brief closely for topic, angle, and message. Still respect brand rules and training style.
+Use this ONLY for the subject / angle of this one {kind}.
+Do NOT treat it as instructions to change niche, content type, tone, format, or style.
+Those always come from AI Training fields above.
 """
 
     avoid_block = ""
@@ -259,39 +360,44 @@ DO NOT reuse these recent titles/hooks/topics (pick a fresh angle):
 {listed}
 """
 
+    cta = _filled(training.get("cta"))
+    cta_line = (
+        f"End with this CTA, spoken in {language} (translate if the CTA text is English): {cta}"
+        if cta
+        else f"Optional soft CTA in {language} at the end — invent one only if it fits."
+    )
+
     user_prompt = f"""
-Niche: {training.get('niche')}
-Content type: {training.get('content_type')}
-Tone: {training.get('tone')}
-Target audience: {training.get('target_audience') or 'general'}
-Hook style: {training.get('hook_style')}
-CTA: {training.get('cta')}
-Brand rules: {training.get('brand_rules') or 'none'}
-Brand / style instructions (user trained AI):
-\"\"\"{training.get('style_prompt')}\"\"\"
-Default Pexels vibe: {training.get('pexels_query')}
-Music mood: {training.get('music_mood')}
+AI TRAINING (source of truth — empty fields were omitted on purpose):
+{_training_lines(training)}
+
+Language code (mandatory for all spoken/written output): {language}
+{cta_line}
 {brief_block}
 {avoid_block}
-Write one unique Shorts script. Never repeat previous clichés word-for-word.
-The opening 3 seconds must feel like a cold open ad — bold, confrontational, unforgettable.
-Also return 5 varied pexels_queries (different angles/scenes) for cinematic B-roll montage.
+Write one unique YouTube script for format "{video_format}".
+The opening must feel bold and unforgettable in {language}.
+Also return 5 varied pexels_queries (English stock-search phrases) for B-roll montage.
 """
 
+    prompt_kwargs = {
+        "language": language,
+        "video_format": video_format,
+        "video_style_line": video_style_line,
+        "content_kind": profile["content_kind"],
+        "aspect_hint": profile["aspect_hint"],
+        "pacing_hint": profile["pacing_hint"],
+        "min_duration": min_d,
+        "max_duration": max_d,
+        "default_duration": profile["default_duration"],
+        "duration": duration,
+        "word_count": word_count,
+    }
+
     if duration_auto:
-        system_content = SYSTEM_PROMPT_AUTO.format(
-            language=training.get("language") or "en",
-            video_format=training.get("video_format") or "shorts",
-            video_style=training.get("video_style") or "cinematic_mixer",
-        )
+        system_content = SYSTEM_PROMPT_AUTO.format(**prompt_kwargs)
     else:
-        system_content = SYSTEM_PROMPT.format(
-            duration=duration,
-            word_count=word_count,
-            language=training.get("language") or "en",
-            video_format=training.get("video_format") or "shorts",
-            video_style=training.get("video_style") or "cinematic_mixer",
-        )
+        system_content = SYSTEM_PROMPT.format(**prompt_kwargs)
 
     response = client.chat.completions.create(
         model=settings.openai_model,
@@ -313,20 +419,23 @@ Also return 5 varied pexels_queries (different angles/scenes) for cinematic B-ro
     chosen_duration: int | None = None
     if duration_auto and data.get("duration_seconds") is not None:
         try:
-            chosen_duration = max(15, min(60, int(data["duration_seconds"])))
+            chosen_duration = max(min_d, min(max_d, int(data["duration_seconds"])))
         except (TypeError, ValueError):
             chosen_duration = None
 
+    pexels_fallback = _filled(training.get("pexels_query")) or "cinematic b-roll"
+    default_title = "Short" if profile["is_short"] else "Video"
+    desc = data.get("description") or f"{script}{profile['hashtag_suffix']}"
     result: dict[str, Any] = {
         "hook": data.get("hook") or script.split(".")[0],
         "script": script,
-        "title": (data.get("title") or "Daily Motivation")[:90],
-        "description": data.get("description")
-        or f"{script}\n\n#Shorts #Motivation",
-        "tags": data.get("tags") or ["shorts", "motivation"],
-        "pexels_queries": data.get("pexels_queries")
-        or [training.get("pexels_query") or "cinematic man"],
+        "title": (data.get("title") or default_title)[:90],
+        "description": desc,
+        "tags": data.get("tags") or list(profile["default_tags"]),
+        "pexels_queries": data.get("pexels_queries") or [pexels_fallback],
         "subtitle_emphasis": data.get("subtitle_emphasis") or [],
+        "aspect_ratio": profile["aspect"],
+        "is_short": profile["is_short"],
     }
     if chosen_duration is not None:
         result["duration_seconds"] = chosen_duration

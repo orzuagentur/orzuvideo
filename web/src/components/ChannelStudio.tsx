@@ -1,22 +1,77 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import type { Profile, VideoJob } from "@/lib/types";
 import { YouTubeVideoCards } from "@/components/YouTubeVideoCards";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
+import {
+  JOB_STATUS_LABEL,
+  QUEUE_STATUSES,
+  jobProgressPercent,
+} from "@/lib/job-status";
+import { useToast } from "@/components/ToastNotice";
+
+type PubStep = "closed" | "root" | "ai" | "device" | "prompt";
+
+function isYoutubeQueueJob(job: VideoJob) {
+  const src = String(job.metadata?.source || "");
+  const pipeline = String(job.metadata?.pipeline || "");
+  if (src === "creativity" || pipeline === "creativity") return false;
+  return QUEUE_STATUSES.has(job.status);
+}
 
 export function ChannelStudio({
   profile,
   videos,
+  initialQueue = [],
+  isTrained = false,
+  aiContentEnabled = false,
 }: {
   profile: Profile | null;
   videos: VideoJob[];
+  initialQueue?: VideoJob[];
+  isTrained?: boolean;
+  aiContentEnabled?: boolean;
 }) {
   const router = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { show: toast, notice } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [step, setStep] = useState<PubStep>("closed");
+  const [prompt, setPrompt] = useState("");
+  const [deviceTitle, setDeviceTitle] = useState("");
+  const [queue, setQueue] = useState<VideoJob[]>(initialQueue);
+  const [aiOn, setAiOn] = useState(aiContentEnabled);
+  const pubMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setQueue(initialQueue);
+  }, [initialQueue]);
+
+  useEffect(() => {
+    if (step !== "root") return;
+    function onDoc(e: MouseEvent) {
+      if (!pubMenuRef.current?.contains(e.target as Node)) {
+        setStep("closed");
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [step]);
+
+  useEffect(() => {
+    setAiOn(aiContentEnabled);
+  }, [aiContentEnabled]);
 
   useEffect(() => {
     if (!profile?.youtube_connected) return;
@@ -37,40 +92,110 @@ export function ChannelStudio({
     };
   }, [profile?.youtube_connected, profile?.youtube_channel_id]);
 
+  const activeJobs = useMemo(
+    () => queue.filter((j) => isYoutubeQueueJob(j)),
+    [queue],
+  );
+
+  const refreshQueue = useCallback(async () => {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    let q = supabase
+      .from("video_jobs")
+      .select(
+        "id,status,title,script_text,youtube_url,youtube_video_id,error_message,scheduled_for,created_at,completed_at,thumbnail_url,preview_url,duration_seconds,metadata",
+      )
+      .eq("user_id", user.id)
+      .in("status", Array.from(QUEUE_STATUSES))
+      .order("created_at", { ascending: false })
+      .limit(20);
+    if (profile?.youtube_channel_id) {
+      q = q.eq("youtube_channel_id", profile.youtube_channel_id);
+    }
+    const { data } = await q;
+    if (data) setQueue((data as VideoJob[]).filter(isYoutubeQueueJob));
+  }, [profile?.youtube_channel_id]);
+
+  useEffect(() => {
+    if (activeJobs.length === 0) return;
+    const t = window.setInterval(() => {
+      void refreshQueue();
+    }, 2500);
+    return () => window.clearInterval(t);
+  }, [activeJobs.length, refreshQueue]);
+
+  async function toggleAiContent() {
+    // First time: must configure required training fields
+    if (!aiOn && !isTrained) {
+      router.push("/dashboard/channel/training?enableAi=1");
+      return;
+    }
+
+    setBusy("ai_toggle");
+    const next = !aiOn;
+    const res = await fetch("/api/schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    const data = await res.json();
+    setBusy(null);
+    if (!res.ok) {
+      if (data.error === "complete_training" && data.redirect) {
+        router.push(String(data.redirect));
+        return;
+      }
+      toast(data.message || data.error || "Failed to toggle AI", "error");
+      return;
+    }
+    setAiOn(next);
+    toast(next ? "AI content enabled." : "AI content disabled.");
+    router.refresh();
+  }
+
   async function sync() {
     setBusy("sync");
-    setMsg(null);
     const res = await fetch("/api/youtube/stats", { method: "POST" });
     const data = await res.json();
     setBusy(null);
     if (!res.ok) {
-      setMsg(data.error || "Sync failed");
+      toast(data.error || "Failed to refresh", "error");
       return;
     }
     if (data.bannerUrl) setBannerUrl(data.bannerUrl as string);
-    setMsg("Stats refreshed.");
+    const imported = Number(data.imported || 0);
+    const updated = Number(data.updated || 0);
+    toast(
+      imported > 0
+        ? `Fetched ${imported} new videos from YouTube` +
+          (updated ? `, updated ${updated}.` : ".")
+        : updated > 0
+          ? `Updated ${updated} videos.`
+          : "Channel data updated.",
+    );
     router.refresh();
   }
 
   async function disconnect() {
     if (!confirm("Disconnect this YouTube channel?")) return;
     setBusy("disconnect");
-    setMsg(null);
     const res = await fetch("/api/youtube/disconnect", { method: "POST" });
     const data = await res.json();
     setBusy(null);
     if (!res.ok) {
-      setMsg(data.error || "Disconnect failed");
+      toast(data.error || "Failed to disconnect", "error");
       return;
     }
-    setMsg("Channel disconnected.");
+    toast("Channel disconnected.");
     router.refresh();
   }
 
   async function removeVideo(youtubeVideoId: string) {
     if (!confirm("Delete this video from YouTube?")) return;
     setBusy(youtubeVideoId);
-    setMsg(null);
     const res = await fetch("/api/youtube/videos", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -79,10 +204,92 @@ export function ChannelStudio({
     const data = await res.json();
     setBusy(null);
     if (!res.ok) {
-      setMsg(data.error || "Delete failed");
+      toast(data.error || "Failed to delete", "error");
       return;
     }
-    setMsg("Video deleted.");
+    toast("Video deleted.");
+    router.refresh();
+  }
+
+  async function startAiAuto() {
+    if (!isTrained) {
+      toast("Save AI Training for this channel first.", "error");
+      return;
+    }
+    setBusy("ai_auto");
+    const res = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "ai_auto",
+        source: "youtube_ai",
+        pipeline: "youtube",
+        publish: true,
+      }),
+    });
+    const data = await res.json();
+    setBusy(null);
+    if (!res.ok) {
+      toast(data.error || "Failed to start", "error");
+      return;
+    }
+    setStep("closed");
+    toast("AI is creating a video and will publish it to YouTube.", "info");
+    await refreshQueue();
+    router.refresh();
+  }
+
+  async function startAiPrompt() {
+    const text = prompt.trim();
+    if (text.length < 8) {
+      toast("Write a prompt in at least one sentence.", "error");
+      return;
+    }
+    if (!isTrained) {
+      toast("Save AI Training for this channel first.", "error");
+      return;
+    }
+    setBusy("ai_prompt");
+    const res = await fetch("/api/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "ai_prompt",
+        source: "youtube_prompt",
+        pipeline: "youtube",
+        publish: true,
+        brief: text,
+      }),
+    });
+    const data = await res.json();
+    setBusy(null);
+    if (!res.ok) {
+      toast(data.error || "Failed to start", "error");
+      return;
+    }
+    setPrompt("");
+    setStep("closed");
+    toast("AI is creating a video from your prompt and will publish it to YouTube.", "info");
+    await refreshQueue();
+    router.refresh();
+  }
+
+  async function startDeviceUpload(file: File) {
+    setBusy("device");
+    const fd = new FormData();
+    fd.set("file", file);
+    if (deviceTitle.trim()) fd.set("title", deviceTitle.trim());
+    const res = await fetch("/api/jobs/upload", { method: "POST", body: fd });
+    const data = await res.json();
+    setBusy(null);
+    if (!res.ok) {
+      toast(data.error || "Failed to upload", "error");
+      return;
+    }
+    setDeviceTitle("");
+    setStep("closed");
+    toast("Video uploaded - publishing to YouTube.", "info");
+    await refreshQueue();
     router.refresh();
   }
 
@@ -91,7 +298,7 @@ export function ChannelStudio({
       <div className="panel rise space-y-4 p-6">
         <h1 className="text-2xl font-semibold">Channel</h1>
         <p className="text-sm text-[color:var(--muted)]">
-          Connect a YouTube channel to publish Shorts and see stats.
+          Connect a YouTube channel to publish videos and see stats.
         </p>
         <a href="/api/youtube/connect" className="btn btn-primary inline-flex">
           Connect YouTube
@@ -101,41 +308,213 @@ export function ChannelStudio({
   }
 
   return (
-    <div className="space-y-6">
-      <header className="rise flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Channel</h1>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a href="/dashboard/channel/training" className="btn btn-primary text-sm">
-            AI Training
-          </a>
+    <div className="relative space-y-6 pb-28">
+      {notice}
+
+      {/* Centered publication modals */}
+      {step === "ai" && (
+        <PubModal
+          title="AI publish"
+          subtitle="Create a video from Training or a prompt"
+          onClose={() => setStep("closed")}
+        >
+          <div className="grid gap-2">
+            <button
+              type="button"
+              disabled={busy === "ai_auto"}
+              className="rounded-xl border border-[color:var(--line)] px-3.5 py-3 text-left transition hover:border-[color:rgba(232,165,75,0.45)] disabled:opacity-50"
+              onClick={() => void startAiAuto()}
+            >
+              <p className="text-sm font-semibold">AI auto</p>
+              <p className="mt-0.5 text-[11px] text-[color:var(--muted)]">
+                Uses niche / style from AI Training and publishes right away
+              </p>
+              <p className="mt-2 text-xs" style={{ color: "var(--accent)" }}>
+                {busy === "ai_auto" ? "Starting..." : "Create and publish"}
+              </p>
+            </button>
+            <button
+              type="button"
+              className="rounded-xl border border-[color:var(--line)] px-3.5 py-3 text-left transition hover:border-[color:rgba(232,165,75,0.45)]"
+              onClick={() => setStep("prompt")}
+            >
+              <p className="text-sm font-semibold">Prompt</p>
+              <p className="mt-0.5 text-[11px] text-[color:var(--muted)]">
+                You write the idea — AI makes a video and publishes
+              </p>
+            </button>
+          </div>
+        </PubModal>
+      )}
+
+      {step === "prompt" && (
+        <PubModal
+          title="Prompt"
+          subtitle="Describe the video — AI will create and publish it"
+          onClose={() => setStep("closed")}
+          onBack={() => setStep("ai")}
+        >
+          <textarea
+            className="field min-h-[110px] w-full text-sm"
+            placeholder="Topic, hook, tone..."
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={busy === "ai_prompt"}
+            autoFocus
+          />
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              className="btn btn-primary text-sm"
+              disabled={busy === "ai_prompt" || prompt.trim().length < 8}
+              onClick={() => void startAiPrompt()}
+            >
+              {busy === "ai_prompt" ? "Starting..." : "Create and publish"}
+            </button>
+          </div>
+        </PubModal>
+      )}
+
+      {step === "device" && (
+        <PubModal
+          title="From device"
+          subtitle="Upload an MP4 and publish to YouTube"
+          onClose={() => setStep("closed")}
+        >
+          <input
+            className="field w-full text-sm"
+            placeholder="YouTube title (optional)"
+            value={deviceTitle}
+            onChange={(e) => setDeviceTitle(e.target.value)}
+            disabled={busy === "device"}
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="video/mp4,video/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void startDeviceUpload(f);
+              e.target.value = "";
+            }}
+          />
           <button
             type="button"
-            className="btn btn-ghost text-sm"
-            disabled={busy === "sync"}
-            onClick={() => void sync()}
+            className="btn btn-primary mt-3 w-full text-sm"
+            disabled={busy === "device"}
+            onClick={() => fileRef.current?.click()}
           >
-            {busy === "sync" ? "Syncing..." : "Refresh"}
+            {busy === "device" ? "Uploading..." : "Choose video from device"}
           </button>
-        </div>
-      </header>
-
-      {msg && <p className="text-sm text-[color:var(--accent)]">{msg}</p>}
+        </PubModal>
+      )}
 
       <section className="panel rise relative">
         <CardMenuSlot>
-          <CardMenu
-            items={[
-              { label: "+ YouTube channel", href: "/api/youtube/connect" },
-              {
-                label: busy === "disconnect" ? "Disconnecting..." : "Disconnect",
-                danger: true,
-                disabled: busy === "disconnect",
-                onClick: () => void disconnect(),
-              },
-            ]}
-          />
+          <div className="relative flex items-center gap-1.5">
+            <div className="relative" ref={pubMenuRef}>
+              <button
+                type="button"
+                title="Publications"
+                aria-label="Publications"
+                aria-expanded={step === "root"}
+                onClick={() =>
+                  setStep((s) => (s === "closed" ? "root" : "closed"))
+                }
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
+                style={{
+                  boxShadow:
+                    step !== "closed"
+                      ? "0 0 0 2px rgba(232,165,75,0.55)"
+                      : undefined,
+                }}
+              >
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M12 3v12" />
+                  <path d="m7 8 5-5 5 5" />
+                  <path d="M5 21h14" />
+                  <path d="M5 17h14" />
+                </svg>
+              </button>
+
+              {/* Compact chooser under the icon */}
+              {step === "root" && (
+                <div
+                  className="absolute right-0 top-10 z-30 w-56 overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1.5 shadow-2xl"
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
+                    onClick={() => setStep("ai")}
+                  >
+                    <span className="text-sm font-semibold">AI publish</span>
+                    <span className="text-[11px] text-[color:var(--muted)]">
+                      Training niche or your prompt
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
+                    onClick={() => setStep("device")}
+                  >
+                    <span className="text-sm font-semibold">From device</span>
+                    <span className="text-[11px] text-[color:var(--muted)]">
+                      Upload MP4 from phone or PC
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              title="Refresh"
+              aria-label="Refresh"
+              disabled={busy === "sync"}
+              onClick={() => void sync()}
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80 disabled:opacity-50"
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+                className={busy === "sync" ? "animate-spin" : undefined}
+              >
+                <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+                <path d="M21 3v6h-6" />
+              </svg>
+            </button>
+            <CardMenu
+              items={[
+                { label: "+ YouTube channel", href: "/api/youtube/connect" },
+                {
+                  label: busy === "disconnect" ? "Disconnecting..." : "Disconnect",
+                  danger: true,
+                  disabled: busy === "disconnect",
+                  onClick: () => void disconnect(),
+                },
+              ]}
+            />
+          </div>
         </CardMenuSlot>
 
         <div className="relative h-28 w-full overflow-hidden rounded-t-[inherit] bg-gradient-to-br from-[#1a1a1a] via-[#2a1810] to-[#0d0d0d] sm:h-36">
@@ -174,38 +553,185 @@ export function ChannelStudio({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 text-center sm:max-w-md">
-            <Stat label="Subscribers" value={profile.youtube_subscriber_count ?? 0} />
-            <Stat label="Views" value={profile.youtube_view_count ?? 0} />
-            <Stat label="Videos" value={profile.youtube_video_count ?? 0} />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="grid min-w-0 flex-1 grid-cols-3 gap-3 text-center sm:max-w-md">
+              <Stat label="Subscribers" value={profile.youtube_subscriber_count ?? 0} />
+              <Stat label="Views" value={profile.youtube_view_count ?? 0} />
+              <Stat label="Videos" value={profile.youtube_video_count ?? 0} />
+            </div>
+
+            {/* AI Training + AI content toggle */}
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              <a
+                href="/dashboard/channel/training"
+                className="rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-3 py-2 text-sm font-semibold transition hover:border-[color:rgba(232,165,75,0.45)]"
+              >
+                AI Training
+              </a>
+              <div className="flex items-center gap-2.5 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-2.5 py-2">
+                <div className="min-w-0 text-right">
+                  <p className="text-[11px] font-semibold leading-tight">AI content</p>
+                  <p className="text-[9px] text-[color:var(--muted)]">
+                    {aiOn ? "On schedule" : "Off"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={aiOn}
+                  disabled={busy === "ai_toggle"}
+                  onClick={() => void toggleAiContent()}
+                  className="relative h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50"
+                  style={{
+                    background: aiOn
+                      ? "rgba(232,165,75,0.95)"
+                      : "rgba(255,255,255,0.12)",
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition"
+                    style={{ left: aiOn ? "1.25rem" : "0.15rem" }}
+                  />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="space-y-3">
-        <h3 className="font-semibold">Published Shorts</h3>
+        <h3 className="font-semibold">Published videos</h3>
         <YouTubeVideoCards
           jobs={videos}
           onDelete={removeVideo}
           busyId={busy}
-          emptyLabel="No published Shorts yet."
+          emptyLabel="No published videos yet."
         />
       </section>
+
+      {activeJobs.length > 0 && (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex w-[min(100%-2rem,300px)] flex-col gap-2 sm:bottom-6 sm:right-6">
+          {activeJobs.map((job) => {
+            const pct = jobProgressPercent(job.status);
+            return (
+              <div
+                key={job.id}
+                className="pointer-events-auto rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-3 shadow-xl backdrop-blur-md"
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold">YouTube video</p>
+                    <p className="truncate text-[10px] text-[color:var(--muted)]">
+                      {JOB_STATUS_LABEL[job.status] || job.status}
+                      {job.title ? ` · ${job.title}` : ""}
+                    </p>
+                  </div>
+                  <span
+                    className="font-[family-name:var(--font-syne)] text-base tabular-nums"
+                    style={{ color: "var(--accent)", fontWeight: 700 }}
+                  >
+                    {pct}%
+                  </span>
+                </div>
+                <div
+                  className="h-1.5 overflow-hidden rounded-full"
+                  style={{ background: "rgba(255,255,255,0.06)" }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-500 ease-out"
+                    style={{
+                      width: `${pct}%`,
+                      background:
+                        "linear-gradient(90deg, var(--accent-dim), var(--accent))",
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PubModal({
+  title,
+  subtitle,
+  onClose,
+  onBack,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  onBack?: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="pub-modal-title"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+        aria-label="Close"
+        onClick={onClose}
+      />
+      <div className="relative z-10 w-full max-w-[340px] overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-4 shadow-2xl">
+        <div className="mb-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            {onBack && (
+              <button
+                type="button"
+                className="mb-1 text-[11px] text-[color:var(--muted)] transition hover:text-[color:var(--fg)]"
+                onClick={onBack}
+              >
+                ← Back
+              </button>
+            )}
+            <h2
+              id="pub-modal-title"
+              className="font-[family-name:var(--font-syne)] text-base leading-tight"
+              style={{ fontWeight: 700 }}
+            >
+              {title}
+            </h2>
+            {subtitle && (
+              <p className="mt-0.5 text-[11px] text-[color:var(--muted)]">
+                {subtitle}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[color:var(--muted)] transition hover:bg-white/8 hover:text-[color:var(--fg)]"
+            aria-label="Close"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
+  const text =
+    value >= 1_000_000
+      ? `${(value / 1_000_000).toFixed(1)}M`
+      : value >= 1_000
+        ? `${(value / 1_000).toFixed(1)}K`
+        : String(value);
   return (
-    <div className="rounded-xl bg-black/20 px-2 py-3">
-      <p className="text-xs text-[color:var(--muted)]">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{formatCount(value)}</p>
+    <div className="rounded-xl border border-[color:var(--line)] px-2 py-3">
+      <p className="text-lg font-semibold tabular-nums">{text}</p>
+      <p className="text-[11px] text-[color:var(--muted)]">{label}</p>
     </div>
   );
-}
-
-/** Locale-independent so SSR and client match. */
-function formatCount(value: number) {
-  const n = Math.round(Number(value) || 0);
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }

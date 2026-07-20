@@ -200,11 +200,46 @@ def _generate_ambient_bed(dest: Path, seconds: float = 90.0) -> JamendoTrack:
     return JamendoTrack(
         id="generated",
         name="Ambient bed",
-        artist="OrzuVideo",
+        artist="OrzuAi",
         shareurl="",
         download_url="",
         path=dest,
     )
+
+
+def download_track_by_id(track_id: str, dest: Path) -> JamendoTrack | None:
+    """Download a specific Jamendo track by id."""
+    if not settings.jamendo_client_id or not track_id:
+        return None
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        results = _fetch_tracks({"id": str(track_id)})
+        if not results:
+            return None
+        pick = results[0]
+        url = pick.get("audiodownload") or pick.get("audio")
+        if not url:
+            return None
+        with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+            r = client.get(url)
+            r.raise_for_status()
+            if len(r.content) < 10_000:
+                return None
+            dest.write_bytes(r.content)
+        track = JamendoTrack(
+            id=str(pick.get("id")),
+            name=str(pick.get("name") or "Unknown"),
+            artist=str(pick.get("artist_name") or "Unknown"),
+            shareurl=str(pick.get("shareurl") or ""),
+            download_url=str(url),
+            path=dest,
+        )
+        _cache_music(dest)
+        print(f"Jamendo by id: {track.name} ({track.id})")
+        return track
+    except Exception as exc:
+        print(f"Jamendo id={track_id} failed: {exc}")
+        return None
 
 
 def download_background_music(
@@ -212,22 +247,33 @@ def download_background_music(
     dest: Path,
     *,
     exclude_ids: set[str] | None = None,
+    preferred_ids: list[str] | None = None,
+    force_mood_bias: bool = False,
 ) -> JamendoTrack:
     """
     Always return a playable music bed.
-    Prefer strong motivational/epic instrumental; skip previously used track IDs.
+    preferred_ids: user-selected tracks from AI Training music group (tried first).
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     client_id = (settings.jamendo_client_id or "").strip()
     print(f"Music: JAMENDO_CLIENT_ID={'set' if client_id else 'MISSING'}")
 
-    forced = (mood or "").strip() or "motivational epic"
-    if "motivat" not in forced.lower() and "epic" not in forced.lower():
-        forced = f"motivational epic {forced}"
+    # 1) Prefer explicit user picks
+    for tid in preferred_ids or []:
+        if exclude_ids and str(tid) in exclude_ids:
+            continue
+        hit = download_track_by_id(str(tid), dest)
+        if hit:
+            return hit
+
+    mood_q = (mood or "").strip() or "cinematic soundtrack"
+    if force_mood_bias:
+        if "motivat" not in mood_q.lower() and "epic" not in mood_q.lower():
+            mood_q = f"motivational epic {mood_q}"
 
     if client_id:
         try:
-            tracks = search_tracks(forced)
+            tracks = search_tracks(mood_q)
             if not tracks:
                 tracks = search_tracks("epic energetic soundtrack")
             pick = _pick_playable(tracks, exclude_ids)

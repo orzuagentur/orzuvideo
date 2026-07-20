@@ -147,30 +147,53 @@ export const SUBTITLE_PRESETS: Preset[] = [
 ];
 
 export const DURATION_PRESETS: Preset[] = [
-  { value: "30", label: "30 seconds" },
-  { value: "35", label: "35 seconds" },
-  { value: "40", label: "40 seconds" },
-  { value: "45", label: "45 seconds" },
-  { value: "50", label: "50 seconds" },
-  { value: "55", label: "55 seconds" },
-  { value: "59", label: "59 seconds (max Short)" },
-  { value: "25", label: "25 seconds" },
   { value: "20", label: "20 seconds" },
-  { value: "48", label: "48 seconds" },
+  { value: "30", label: "30 seconds" },
+  { value: "45", label: "45 seconds" },
+  { value: "59", label: "59 seconds (max Short)" },
+  { value: "90", label: "1.5 minutes" },
+  { value: "120", label: "2 minutes" },
+  { value: "180", label: "3 minutes" },
+  { value: "300", label: "5 minutes" },
+  { value: "480", label: "8 minutes" },
+  { value: "600", label: "10 minutes" },
+];
+
+/** Durations shown for Shorts (vertical ≤60s). */
+export const SHORT_DURATION_PRESETS: Preset[] = [
+  { value: "20", label: "20 seconds" },
+  { value: "30", label: "30 seconds" },
+  { value: "45", label: "45 seconds" },
+  { value: "59", label: "59 seconds (max Short)" },
+];
+
+/** Durations for long / simple YouTube videos (16:9). */
+export const LONG_DURATION_PRESETS: Preset[] = [
+  { value: "90", label: "1.5 minutes" },
+  { value: "120", label: "2 minutes" },
+  { value: "180", label: "3 minutes" },
+  { value: "300", label: "5 minutes" },
+  { value: "480", label: "8 minutes" },
+  { value: "600", label: "10 minutes" },
 ];
 
 export const VIDEO_FORMAT_PRESETS: Preset[] = [
-  { value: "shorts", label: "YouTube Shorts (9:16)" },
-  { value: "shorts_mixer", label: "Shorts mixer (multi-clip)" },
-  { value: "reel_style", label: "Reel-style cut" },
-  { value: "story_arc", label: "Story arc Short" },
-  { value: "hook_body_cta", label: "Hook → body → CTA" },
-  { value: "listicle", label: "Listicle vertical" },
-  { value: "montage_heavy", label: "Montage-heavy" },
-  { value: "talking_over_broll", label: "Talking over B-roll" },
-  { value: "quote_cards", label: "Quote cards mix" },
-  { value: "documentary_snip", label: "Documentary snip" },
+  { value: "shorts", label: "Short (9:16)" },
+  { value: "video", label: "Video (16:9)" },
+  { value: "simple", label: "Simple video (16:9)" },
 ];
+
+export function isShortFormat(format: string): boolean {
+  return format === "shorts" || format === "shorts_mixer";
+}
+
+export function durationPresetsForFormat(format: string): Preset[] {
+  return isShortFormat(format) ? SHORT_DURATION_PRESETS : LONG_DURATION_PRESETS;
+}
+
+export function defaultDurationForFormat(format: string): number {
+  return isShortFormat(format) ? 45 : 180;
+}
 
 export const VIDEO_STYLE_PRESETS: Preset[] = [
   { value: "cinematic_mixer", label: "Cinematic mixer" },

@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from orzuvideo.config import TEMP_DIR, settings
+from orzuvideo.pipeline import clipping as clip_pipe
 from orzuvideo.pipeline.editor import build_short
-from orzuvideo.pipeline.media import synthesize_with_timestamps
+from orzuvideo.pipeline.media import ffprobe_duration, synthesize_with_timestamps
 from orzuvideo.services import db
 from orzuvideo.services.jamendo import attribution_line, download_background_music
 from orzuvideo.services.pexels import download_stock_clips
@@ -37,8 +38,52 @@ def _aspect_size(aspect: str) -> tuple[str, int, int]:
     return "9:16", 1080, 1920
 
 
+def _format_aspect(video_format: str | None) -> str:
+    fmt = (video_format or "shorts").strip().lower()
+    if fmt in ("video", "long", "longform", "youtube_video", "simple", "simple_video"):
+        return "16:9"
+    return "9:16"
+
+
+def _duration_bounds(video_format: str | None) -> tuple[int, int]:
+    fmt = (video_format or "shorts").strip().lower()
+    if fmt in ("video", "long", "longform", "youtube_video"):
+        return 90, 600
+    if fmt in ("simple", "simple_video"):
+        return 60, 300
+    return 15, 60
+
+
+def _clamp_duration(seconds: int, video_format: str | None) -> int:
+    lo, hi = _duration_bounds(video_format)
+    return max(lo, min(hi, int(seconds)))
+
+
+def _clip_count_for_duration(base: int, duration_sec: int) -> int:
+    """Longer videos need more B-roll clips so cuts don't loop too hard."""
+    base = max(3, int(base or 5))
+    if duration_sec <= 60:
+        return base
+    if duration_sec <= 180:
+        return min(18, max(base, 8))
+    if duration_sec <= 360:
+        return min(24, max(base, 12))
+    return min(30, max(base, 16))
+
+
+def _is_clipping_job(meta: dict) -> bool:
+    source = str(meta.get("source") or "").strip().lower()
+    pipeline = str(meta.get("pipeline") or "").strip().lower()
+    return source in ("ai_clipping", "clipping") or pipeline in (
+        "ai_clipping",
+        "clipping",
+    )
+
+
 def _is_creativity_job(job: dict, meta: dict) -> bool:
     """Creativity = platform prompt video. Must NEVER use AI Training / YouTube settings."""
+    if _is_clipping_job(meta):
+        return False
     source = str(meta.get("source") or "").strip().lower()
     pipeline = str(meta.get("pipeline") or "").strip().lower()
     if source == "creativity" or pipeline == "creativity":
@@ -49,6 +94,199 @@ def _is_creativity_job(job: dict, meta: dict) -> bool:
     return False
 
 
+def _download_job_video(url: str, dest: Path) -> Path:
+    import httpx
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with httpx.Client(timeout=300.0, follow_redirects=True) as client:
+        r = client.get(url)
+        r.raise_for_status()
+        dest.write_bytes(r.content)
+    return dest
+
+
+def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
+    """Long device video → short viral cut (no YouTube / no AI Training)."""
+    job_id = job["id"]
+    user_id = job["user_id"]
+    meta0 = _job_meta(job)
+
+    aspect, out_w, out_h = _aspect_size(str(meta0.get("aspect_ratio") or "9:16"))
+    try:
+        target_dur = float(meta0.get("duration_seconds") or 30)
+    except (TypeError, ValueError):
+        target_dur = 30.0
+    target_dur = max(15.0, min(60.0, target_dur))
+
+    add_subs = bool(meta0.get("add_subtitles", True))
+    add_music = bool(meta0.get("add_music", True))
+    add_effects = bool(meta0.get("add_effects", True))
+    instructions = (meta0.get("user_brief") or meta0.get("instructions") or "").strip() or None
+
+    source_url = (
+        str(meta0.get("source_url") or "").strip()
+        or str(job.get("preview_url") or "").strip()
+    )
+    if not source_url:
+        raise RuntimeError("AI Clipping job missing source video URL")
+
+    print(
+        f"[CLIPPING] job={job_id} aspect={aspect} target={target_dur}s "
+        f"subs={add_subs} music={add_music} effects={add_effects}"
+    )
+
+    db.update_job(
+        sb,
+        job_id,
+        status="generating_script",
+        metadata={
+            **meta0,
+            "source": "ai_clipping",
+            "pipeline": "ai_clipping",
+            "publish": False,
+            "aspect_ratio": aspect,
+            "output_size": [out_w, out_h],
+            "duration_seconds": int(target_dur),
+        },
+    )
+
+    source = work / "source.mp4"
+    _download_job_video(source_url, source)
+    source_dur = ffprobe_duration(source)
+    if source_dur < 8:
+        raise RuntimeError("Source video is too short (need at least ~8 seconds)")
+
+    transcript = ""
+    words: list = []
+    audio_full = work / "source_audio.mp3"
+    try:
+        clip_pipe.extract_audio(source, audio_full)
+        transcript, words = clip_pipe.transcribe_source(
+            audio_full, user_id=user_id, job_id=job_id
+        )
+    except Exception as exc:
+        print(f"[CLIPPING] transcription skipped: {exc}")
+
+    speech = clip_pipe.has_meaningful_speech(transcript, words)
+    # Auto-enable subs only when speech exists and user asked
+    want_subs = add_subs and speech
+
+    start, end, title = clip_pipe.pick_clip_window(
+        source_duration=source_dur,
+        target_duration=target_dur,
+        transcript=transcript,
+        instructions=instructions,
+        user_id=user_id,
+        job_id=job_id,
+    )
+    clip_len = max(1.0, end - start)
+    print(f"[CLIPPING] window {start:.1f}-{end:.1f}s title={title!r} speech={speech}")
+
+    db.update_job(
+        sb,
+        job_id,
+        status="editing",
+        title=title,
+        script_text=(transcript[:2000] if transcript else None),
+        duration_seconds=int(round(clip_len)),
+        metadata={
+            **meta0,
+            "source": "ai_clipping",
+            "pipeline": "ai_clipping",
+            "publish": False,
+            "aspect_ratio": aspect,
+            "output_size": [out_w, out_h],
+            "duration_seconds": int(round(clip_len)),
+            "clip_start": start,
+            "clip_end": end,
+            "has_speech": speech,
+        },
+    )
+
+    cut = work / "cut.mp4"
+    clip_pipe.cut_segment(source, start, clip_len, cut)
+
+    framed = work / "framed.mp4"
+    clip_pipe.reframe_clip(
+        cut, framed, width=out_w, height=out_h, effects=add_effects
+    )
+
+    voice_a = work / "clip_voice.aac"
+    clip_pipe.extract_clip_audio(framed, voice_a)
+
+    music_path = None
+    music_attr = None
+    if add_music:
+        db.update_job(sb, job_id, status="fetching_media")
+        try:
+            mood = "energetic upbeat"
+            if instructions:
+                mood = f"energetic {instructions[:40]}"
+            track = download_background_music(
+                mood,
+                work / "music",
+                exclude_ids=set(),
+            )
+            if track and track.path:
+                music_path = track.path
+                music_attr = attribution_line(track)
+        except Exception as exc:
+            print(f"[CLIPPING] music skipped: {exc}")
+
+    mixed_a = work / "mixed.aac"
+    clip_pipe.mix_clip_music(voice_a, music_path, mixed_a, duration=clip_len)
+
+    muxed = work / "muxed.mp4"
+    clip_pipe.mux_video_audio(framed, mixed_a, muxed)
+
+    final = work / "clip_final.mp4"
+    if want_subs:
+        window_words = clip_pipe.words_in_window(words, start, end)
+        clip_pipe.burn_subs_keep_audio(
+            muxed,
+            window_words,
+            final,
+            work_dir=work,
+            size=(out_w, out_h),
+        )
+    else:
+        final.write_bytes(muxed.read_bytes())
+
+    db.update_job(sb, job_id, status="uploading")
+    stored = upload_preview(sb, user_id=user_id, job_id=job_id, video_path=final)
+    meta_done = {
+        **meta0,
+        "source": "ai_clipping",
+        "pipeline": "ai_clipping",
+        "publish": False,
+        "aspect_ratio": aspect,
+        "output_size": [out_w, out_h],
+        "duration_seconds": int(round(clip_len)),
+        "clip_start": start,
+        "clip_end": end,
+        "has_speech": speech,
+        "add_subtitles": want_subs,
+        "add_music": bool(music_path),
+        "add_effects": add_effects,
+        "music_attribution": music_attr,
+        **storage_meta(stored),
+    }
+    db.update_job(
+        sb,
+        job_id,
+        status="ready",
+        title=title,
+        preview_url=stored.public_url,
+        video_path=str(final),
+        completed_at=datetime.now(timezone.utc).isoformat(),
+        duration_seconds=int(round(clip_len)),
+        storage_path=stored.path,
+        storage_bucket=stored.bucket,
+        metadata=meta_done,
+    )
+    print(f"[CLIPPING] ready job={job_id} url={stored.public_url}")
+
+
 def process_job(job: dict) -> None:
     sb = db.get_supabase()
     job_id = job["id"]
@@ -57,6 +295,20 @@ def process_job(job: dict) -> None:
     work.mkdir(parents=True, exist_ok=True)
     meta0 = _job_meta(job)
     user_brief = (meta0.get("user_brief") or "").strip() or None
+
+    if _is_clipping_job(meta0):
+        try:
+            _process_clipping_job(job, sb=sb, work=work)
+        except Exception as exc:
+            db.update_job(
+                sb,
+                job_id,
+                status="failed",
+                error_message=f"{exc}\n{traceback.format_exc()[-1500:]}",
+            )
+            raise
+        return
+
     is_creativity = _is_creativity_job(job, meta0)
 
     # Default publish=True only for real YouTube jobs; Creativity never publishes
@@ -141,18 +393,25 @@ def process_job(job: dict) -> None:
                     training = {
                         **training,
                         "duration_auto": False,
-                        "duration_seconds": max(
-                            15, min(60, int(meta0["duration_seconds"]))
+                        "duration_seconds": _clamp_duration(
+                            int(meta0["duration_seconds"]),
+                            training.get("video_format"),
                         ),
                     }
                 except (TypeError, ValueError):
                     pass
 
-            aspect, out_w, out_h = _aspect_size(str(meta0.get("aspect_ratio") or "9:16"))
+            # Aspect from Training format (Short = 9:16, Video/Simple = 16:9)
+            # unless the job explicitly overrides aspect_ratio
+            fmt_aspect = _format_aspect(str(training.get("video_format") or "shorts"))
+            aspect, out_w, out_h = _aspect_size(
+                str(meta0.get("aspect_ratio") or fmt_aspect)
+            )
             meta0 = {
                 **meta0,
                 "aspect_ratio": aspect,
                 "output_size": [out_w, out_h],
+                "video_format": training.get("video_format") or "shorts",
                 "used_ai_training": True,
             }
 
@@ -258,7 +517,12 @@ def process_job(job: dict) -> None:
         }
         if script_data.get("duration_seconds") is not None:
             try:
-                chosen = max(15, min(60, int(script_data["duration_seconds"])))
+                fmt = str(
+                    (training or {}).get("video_format")
+                    or meta0.get("video_format")
+                    or "shorts"
+                )
+                chosen = _clamp_duration(int(script_data["duration_seconds"]), fmt)
                 script_update["duration_seconds"] = chosen
                 script_update["metadata"] = {
                     **script_update["metadata"],
@@ -271,6 +535,19 @@ def process_job(job: dict) -> None:
                 }
             except (TypeError, ValueError):
                 pass
+        # Apply aspect from script/format if YouTube training path
+        if not is_creativity and script_data.get("aspect_ratio"):
+            aspect, out_w, out_h = _aspect_size(str(script_data["aspect_ratio"]))
+            script_update["metadata"] = {
+                **script_update["metadata"],
+                "aspect_ratio": aspect,
+                "output_size": [out_w, out_h],
+            }
+            meta0 = {
+                **meta0,
+                "aspect_ratio": aspect,
+                "output_size": [out_w, out_h],
+            }
         db.update_job(sb, job_id, **script_update)
         db.record_media_usage(
             sb,
@@ -314,12 +591,32 @@ def process_job(job: dict) -> None:
         else:
             montage = db.get_montage_settings(sb, user_id)
         avoid_days = int(montage.get("avoid_reuse_days") or 60)
-        clip_count = int(montage.get("clip_count") or 5)
+        base_clips = int(montage.get("clip_count") or 5)
+        try:
+            dur_for_clips = int(
+                (training or {}).get("duration_seconds")
+                or meta0.get("duration_seconds")
+                or 45
+            )
+        except (TypeError, ValueError):
+            dur_for_clips = 45
+        clip_count = (
+            base_clips
+            if is_creativity
+            else _clip_count_for_duration(base_clips, dur_for_clips)
+        )
         used_pexels = db.used_media_ids(sb, user_id, "pexels", days=avoid_days)
         used_jamendo = db.used_media_ids(sb, user_id, "jamendo", days=avoid_days)
 
         db.update_job(sb, job_id, status="fetching_media")
-        queries = script_data["pexels_queries"] or [training.get("pexels_query")]
+        queries = [
+            q
+            for q in (script_data.get("pexels_queries") or [])
+            if isinstance(q, str) and q.strip()
+        ]
+        fallback_q = str(training.get("pexels_query") or "").strip()
+        if not queries:
+            queries = [fallback_q] if fallback_q else ["cinematic b-roll"]
         clips, pexels_ids = download_stock_clips(
             queries,
             work / "clips",
@@ -335,16 +632,86 @@ def process_job(job: dict) -> None:
                 job_id=job_id,
             )
 
+        music_prefs = training.get("music_prefs") or {}
+        if isinstance(music_prefs, str):
+            try:
+                import json as _json
+
+                music_prefs = _json.loads(music_prefs)
+            except Exception:
+                music_prefs = {}
+        if not isinstance(music_prefs, dict):
+            music_prefs = {}
+
+        preferred_ids = [
+            str(x)
+            for x in (music_prefs.get("selected_track_ids") or [])
+            if x
+        ]
+        # Custom group tracks if active group is custom
+        active_gid = str(
+            training.get("music_group")
+            or music_prefs.get("active_group_id")
+            or ""
+        ).strip()
+        for cg in music_prefs.get("custom_groups") or []:
+            if not isinstance(cg, dict):
+                continue
+            if str(cg.get("id") or "") == active_gid:
+                preferred_ids = [
+                    str(t.get("id") if isinstance(t, dict) else t)
+                    for t in (cg.get("tracks") or [])
+                    if t
+                ] + preferred_ids
+                break
+
+        # Built-in group id → search mood (no forced motivational bias)
+        group_mood_map = {
+            "epic": "epic soundtrack orchestral",
+            "motivational": "motivational energetic upbeat",
+            "dark": "dark ambient electronic intense",
+            "calm": "calm ambient chill relaxing",
+            "upbeat": "happy upbeat pop energetic",
+            "lofi": "lofi chill ambient",
+            "workout": "workout energetic hiphop electronic",
+            "luxury": "luxury ambient cinematic soft",
+        }
         music_mood = (
-            script_data.get("music_mood")
-            or montage.get("music_mood")
-            or training.get("music_mood")
-            or "motivational epic"
+            group_mood_map.get(active_gid)
+            or str(script_data.get("music_mood") or "").strip()
+            or str(montage.get("music_mood") or "").strip()
+            or str(training.get("music_mood") or "").strip()
+            or "cinematic soundtrack"
         )
+
+        user_music_vol = training.get("music_volume")
+        try:
+            user_vol = float(user_music_vol) if user_music_vol is not None else None
+        except (TypeError, ValueError):
+            user_vol = None
+        if user_vol is not None:
+            body_vol = max(0.15, min(1.0, user_vol))
+            hook_vol = min(1.2, body_vol + 0.25)
+        else:
+            hook_vol = float(montage.get("music_volume_hook") or 0.88)
+            body_vol = float(montage.get("music_volume_body") or 0.58)
+
+        voice_vol_raw = training.get("voice_volume")
+        if voice_vol_raw is None and isinstance(music_prefs, dict):
+            voice_vol_raw = music_prefs.get("voice_volume")
+        if voice_vol_raw is None:
+            voice_vol_raw = montage.get("voice_volume")
+        try:
+            voice_vol = max(0.5, min(1.4, float(voice_vol_raw if voice_vol_raw is not None else 1.05)))
+        except (TypeError, ValueError):
+            voice_vol = 1.05
+
         jamendo = download_background_music(
             music_mood,
             work / "music.mp3",
             exclude_ids=used_jamendo,
+            preferred_ids=preferred_ids,
+            force_mood_bias=False,
         )
         music_path = jamendo.path
         if music_path is None or not music_path.exists():
@@ -395,12 +762,29 @@ def process_job(job: dict) -> None:
             output_path=out_video,
             emphasis=script_data.get("subtitle_emphasis"),
             hook_text=script_data.get("hook"),
-            music_volume_hook=float(montage.get("music_volume_hook") or 0.88),
-            music_volume_body=float(montage.get("music_volume_body") or 0.58),
-            voice_volume=float(montage.get("voice_volume") or 1.05),
+            music_volume_hook=hook_vol,
+            music_volume_body=body_vol,
+            voice_volume=voice_vol,
             size=(out_w, out_h),
         )
         db.update_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
+
+        # Cover image from the finished Short (Creativity cards + YouTube thumb)
+        from orzuvideo.services.thumbnail import extract_thumbnail, upload_thumbnail
+
+        thumb_local = work / "thumb.jpg"
+        thumb_url = None
+        try:
+            extract_thumbnail(out_video, thumb_local, at_sec=1.2)
+            thumb_stored = upload_thumbnail(
+                sb, user_id=user_id, job_id=job_id, image_path=thumb_local
+            )
+            thumb_url = thumb_stored.public_url
+            db.update_job(sb, job_id, thumbnail_url=thumb_url)
+            print(f"Thumbnail ready: {thumb_url}")
+        except Exception as thumb_exc:
+            print(f"Thumbnail extract/upload skipped: {thumb_exc}")
+            thumb_local = None
 
         # Always upload to Supabase Storage — platform library depends on this file
         db.update_job(sb, job_id, status="uploading")
@@ -452,6 +836,7 @@ def process_job(job: dict) -> None:
             title=script_data["title"],
             description=description,
             tags=script_data["tags"],
+            thumbnail_path=thumb_local if thumb_local and thumb_local.exists() else None,
         )
 
         if yt.get("access_token"):
@@ -512,14 +897,6 @@ def process_job(job: dict) -> None:
 
 def process_next_job() -> bool:
     sb = db.get_supabase()
-    # Prefer Instagram queue when present, then YouTube
-    ig_job = db.claim_next_instagram_job(sb)
-    if ig_job:
-        from orzuvideo.ig_runner import process_instagram_job
-
-        process_instagram_job(ig_job)
-        return True
-
     job = db.claim_next_job(sb)
     if not job:
         return False
@@ -528,15 +905,29 @@ def process_next_job() -> bool:
 
 
 def run_forever() -> None:
-    print("OrzuVideo worker started. Polling for jobs...")
+    print("OrzuAi worker started. Polling for jobs + comment replies...")
     sb = db.get_supabase()
+    idle_ticks = 0
     while True:
         try:
             db.beat_presence(sb, working=False)
             worked = process_next_job()
             if worked:
                 db.beat_presence(sb, working=True)
-            if not worked:
+                idle_ticks = 0
+            else:
+                idle_ticks += 1
+                # Every ~2 idle polls (or always every 4th tick), scan comments
+                if idle_ticks % 2 == 0:
+                    try:
+                        from orzuvideo.comment_runner import process_comment_replies
+
+                        n = process_comment_replies()
+                        if n:
+                            print(f"[comments] posted {n} AI repl(ies)")
+                            db.beat_presence(sb, working=True)
+                    except Exception as ce:
+                        print(f"[comments] loop error: {ce}")
                 time.sleep(settings.poll_interval_sec)
         except KeyboardInterrupt:
             print("Worker stopped.")

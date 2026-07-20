@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { TrainingStudio } from "@/components/TrainingStudio";
 import { getActiveYoutubeChannel } from "@/lib/youtube-channels";
@@ -44,11 +45,13 @@ export default async function ChannelTrainingPage() {
   ]);
 
   return (
-    <TrainingStudio
-      initial={(training as AiTraining) ?? null}
-      schedule={(schedule as PublishSchedule) ?? null}
-      embeddedInChannel
-      channelTitle={active?.title || null}
-    />
+    <Suspense fallback={<p className="text-sm text-[color:var(--muted)]">Loading…</p>}>
+      <TrainingStudio
+        initial={(training as AiTraining) ?? null}
+        schedule={(schedule as PublishSchedule) ?? null}
+        embeddedInChannel
+        channelTitle={active?.title || null}
+      />
+    </Suspense>
   );
 }

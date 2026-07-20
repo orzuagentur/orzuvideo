@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
+import { YouTubeChannelsButton } from "@/components/AppShell";
 
 type MediaKind = "all" | "video" | "photo" | "music";
 
@@ -493,8 +494,9 @@ export function MediaStudio() {
     <div className="space-y-4">
       <form
         onSubmit={onSearch}
-        className="sticky top-0 z-40 -mx-4 flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] bg-[color:var(--bg)] px-4 py-3 md:-mx-6 md:px-6"
+        className="sticky top-[5.75rem] z-40 -mx-4 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-4 py-3 backdrop-blur-md md:top-[6.25rem] md:-mx-6 md:px-6"
       >
+        <YouTubeChannelsButton />
         <div className="relative min-w-0 flex-1">
           {showFormatFilter && (
             <div className="absolute left-1.5 top-1/2 z-10 -translate-y-1/2" ref={formatRef}>
@@ -591,10 +593,27 @@ export function MediaStudio() {
               setTypeOpen((v) => !v);
               setFormatOpen(false);
             }}
-            className="flex min-w-[7.5rem] items-center justify-between gap-2 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] px-3 py-2.5 text-sm font-medium"
+            className="flex min-w-[7rem] items-center justify-between gap-1.5 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] px-3 py-2.5 text-sm font-medium"
           >
             <span>{typeLabel}</span>
-            <span className="text-[10px] text-[color:var(--muted)]">▾</span>
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+              className="opacity-70"
+              style={{
+                transform: typeOpen ? "rotate(180deg)" : undefined,
+                transition: "transform 0.15s ease",
+              }}
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
           </button>
           {typeOpen && (
             <div className="absolute right-0 top-full z-50 mt-1.5 w-44 overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] py-1 shadow-2xl">

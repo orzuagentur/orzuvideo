@@ -28,8 +28,6 @@ class Settings:
     elevenlabs_voice_id: str = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
     pexels_api_key: str = os.getenv("PEXELS_API_KEY", "")
     jamendo_client_id: str = os.getenv("JAMENDO_CLIENT_ID", "")
-    heygen_api_key: str = os.getenv("HEYGEN_API_KEY", "")
-    heygen_avatar_id: str = os.getenv("HEYGEN_AVATAR_ID", "")
     youtube_client_id: str = os.getenv("YOUTUBE_CLIENT_ID", "")
     youtube_client_secret: str = os.getenv("YOUTUBE_CLIENT_SECRET", "")
     poll_interval_sec: float = float(os.getenv("POLL_INTERVAL_SEC", "15"))

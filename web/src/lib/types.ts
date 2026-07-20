@@ -28,6 +28,27 @@ export type AiTraining = {
   cta: string;
   pexels_query: string;
   music_mood: string;
+  music_group?: string;
+  music_volume?: number;
+  voice_volume?: number;
+  music_prefs?: {
+    active_group_id?: string;
+    volume?: number;
+    voice_volume?: number;
+    selected_track_ids?: string[];
+    custom_groups?: Array<{
+      id: string;
+      name: string;
+      tracks: Array<{
+        id: string;
+        name: string;
+        artist: string;
+        previewUrl: string | null;
+        thumb?: string | null;
+        durationSec?: number | null;
+      }>;
+    }>;
+  } | null;
   voice_id: string;
   subtitle_style: string;
   duration_seconds: number;

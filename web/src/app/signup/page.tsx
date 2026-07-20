@@ -47,7 +47,7 @@ export default function SignupPage() {
         className="mb-10 font-[family-name:var(--font-syne)] text-xl"
         style={{ fontWeight: 800 }}
       >
-        OrzuVideo
+        OrzuAi
       </Link>
       <div className="panel rise p-7">
         <h1 className="text-2xl font-semibold">Create account</h1>

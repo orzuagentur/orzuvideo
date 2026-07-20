@@ -8,7 +8,7 @@ export default function HomePage() {
           className="font-[family-name:var(--font-syne)] text-2xl font-800 tracking-tight"
           style={{ fontWeight: 800 }}
         >
-          OrzuVideo
+          OrzuAi
         </p>
         <div className="flex items-center gap-3">
           <Link href="/login" className="btn btn-ghost text-sm">
@@ -32,7 +32,7 @@ export default function HomePage() {
           className="relative font-[family-name:var(--font-syne)] text-5xl leading-[1.05] tracking-tight sm:text-7xl"
           style={{ fontWeight: 800 }}
         >
-          OrzuVideo
+          OrzuAi
         </p>
         <h1 className="relative mt-5 max-w-2xl text-2xl leading-snug text-[color:var(--fg)] sm:text-3xl">
           Train your AI once. Wake up to two Shorts already published.

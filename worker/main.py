@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the OrzuVideo worker loop."""
+"""Run the OrzuAi worker loop."""
 
 from orzuvideo.runner import run_forever
 

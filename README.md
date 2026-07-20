@@ -1,99 +1,86 @@
-# OrzuVideo
+# OrzuAi
 
-Простой MVP: сайт на Vercel + Supabase + Python-воркер с FFmpeg.
-Раз в день (или по кнопке) ИИ пишет сценарий (GPT-4o-mini), голос (ElevenLabs),
-скачивает футаж (Pexels), монтирует Short 9:16 с karaoke-субтитрами и заливает на YouTube.
+MVP: Next.js on Vercel + Supabase + a Python worker with FFmpeg.
+On a schedule (or on demand), AI writes a script (GPT-4o-mini), synthesizes voice (ElevenLabs),
+downloads footage (Pexels), edits a 9:16 Short with karaoke captions, and uploads to YouTube.
 
-## Архитектура
+## Architecture
 
 ```
-web/          Next.js (Vercel) — регистрация, YouTube OAuth, AI training, cron
-worker/       Python + FFmpeg — монтаж и публикация
-supabase/     SQL схема
+web/          Next.js (Vercel) — auth, YouTube OAuth, AI training, cron
+worker/       Python + FFmpeg — edit and publish
+supabase/     SQL schema
 ```
 
-Поток:
+Flow:
 
-1. Регистрация email (Supabase Auth)
-2. Connect YouTube (Google OAuth, offline refresh token)
-3. AI Training — один раз описываешь нишу / стиль / Pexels-запрос
-4. Enable daily → Vercel Cron создаёт 2 job'а в `video_jobs`
-5. Worker забирает job → script → TTS → Pexels → FFmpeg edit → YouTube Shorts
+1. Sign up with email (Supabase Auth)
+2. Connect YouTube
+3. AI Training — set niche / style / voice / music once
+4. Enable schedule → Vercel Cron inserts jobs into `video_jobs`
+5. Worker claims job → script → TTS → Pexels → FFmpeg → YouTube Shorts
 
 ## 1. Supabase
 
-1. Создай проект на [supabase.com](https://supabase.com)
-2. SQL Editor → выполни по очереди:
-   - `supabase/migrations/001_initial.sql`
-   - `supabase/migrations/002_pro_dashboard.sql`
-   - …остальные миграции по номеру…
-   - `supabase/migrations/010_creativity_storage.sql` — bucket `short-previews` для видео Creativity
-3. Authentication → Providers → Email: включи
-4. Скопируй URL, anon key, service_role key
+1. Create a project on [supabase.com](https://supabase.com)
+2. SQL Editor → run migrations in order:
+   - `supabase/migrations/001_*.sql` …
+   - …remaining migrations by number…
+   - `supabase/migrations/010_creativity_storage.sql` — `short-previews` bucket for Creativity
+   - `supabase/migrations/012_music_prefs_thumbs.sql` — music prefs + thumbnails
+   - `supabase/migrations/013_cleanup_instagram_rename_avatar.sql` — drop Instagram junk (if not already)
+   - `supabase/migrations/015_drop_avatar_heygen.sql` — remove Avatar / HeyGen tables
+3. Authentication → Providers → Email: enable
+4. Copy URL, anon key, and service_role key
 
-### Storage (Creativity)
+Finished videos live in Supabase Storage:
 
-Готовые ролики хранятся в Supabase Storage:
+| What | Where |
+|------|--------|
+| MP4 file | bucket `short-previews` → `{user_id}/{job_id}.mp4` |
+| Link | `video_jobs.preview_url` + `storage_path` |
+| View | `/api/jobs/[id]/preview` (signed URL) |
 
-| Что | Где |
-|-----|-----|
-| MP4 файл | bucket `short-previews` → `{user_id}/{job_id}.mp4` |
-| Ссылка | `video_jobs.preview_url` + `storage_path` |
-| Просмотр | `/api/jobs/[id]/preview` (signed URL) |
+The worker does **not** mark status `ready` until Storage upload succeeds.
 
-Worker **не** ставит статус `ready`, пока upload в Storage не успешен.
+## 2. API keys
 
-## 2. API ключи
-
-| Сервис | Зачем |
-|--------|--------|
-| OpenAI (`gpt-4o-mini`) | Сценарий Shorts |
-| ElevenLabs | Голос + тайминги субтитров |
-| Pexels | Фоновые видео (портрет) |
-| Jamendo | Фоновая instrumental-музыка (client_id) |
-| Google Cloud YouTube Data API v3 | OAuth + upload |
-
-### Google / YouTube
-
-1. Google Cloud Console → новый проект
-2. Enable **YouTube Data API v3**
-3. OAuth consent screen (External) → scopes: `youtube.upload`, `youtube.readonly`
-4. Credentials → OAuth Client ID (Web)
-5. Authorized redirect URI:
-   - local: `http://localhost:3000/api/youtube/callback`
-   - prod: `https://YOUR_DOMAIN/api/youtube/callback`
+| Service | Purpose |
+|---------|---------|
+| OpenAI (`gpt-4o-mini`) | Shorts script |
+| ElevenLabs | Voice + caption timings |
+| Pexels | Background video (portrait) |
+| Jamendo | Background instrumental music (`client_id`) |
 
 ## 3. Web (Vercel)
 
+1. Google Cloud Console → new project (YouTube Data API + OAuth)
+2. Copy `web/.env.example` → `web/.env.local` and fill keys
+3. On Vercel, add the same env vars + `CRON_SECRET`
+4. `vercel.json` already schedules cron: daily 08:00 UTC → `/api/cron/daily`
+
 ```bash
 cd web
-cp .env.example .env.local
-# заполни ключи
 npm install
 npm run dev
 ```
 
-На Vercel добавь те же env + `CRON_SECRET`.
-`vercel.json` уже ставит cron: каждый день 08:00 UTC → `/api/cron/daily`.
+## 4. Worker
 
-## 4. Worker (Python)
-
-Нужен **FFmpeg** в PATH.
+Requires **FFmpeg** on PATH.
 
 ```bash
 cd worker
 python -m venv .venv
-# Windows:
-.venv\Scripts\activate
+# Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env
-# заполни ключи (тот же SUPABASE service role)
+# fill worker/.env (same Supabase service role)
 python main.py
 ```
 
-Опционально: положи royalty-free mp3 в `worker/assets/music/` — подложится как фон.
+Optional: put a royalty-free mp3 in `worker/assets/music/` as a fallback bed.
 
-Docker (Railway / любой VPS):
+Docker (Railway / any VPS):
 
 ```bash
 cd worker
@@ -101,27 +88,26 @@ docker build -t orzuvideo-worker .
 docker run --env-file .env orzuvideo-worker
 ```
 
-## 5. Как пользоваться
+## 5. How to use
 
-1. Открой сайт → Sign up
-2. Dashboard → Connect YouTube
-3. AI training → сохрани промпт (пример уже есть)
-4. Enable daily **или** Generate 1 Short now
-5. Worker должен быть запущен — статус job обновится до Published
+1. Open the site → Sign up
+2. Connect YouTube
+3. AI Training → Save (required: Language, Voice, Music, Niche, Script style)
+4. Enable AI content on Channel **or** create a Short from Publications
+5. Keep the worker running — job status updates through to Published / Ready
 
-## Монтаж (worker)
+## Editing (worker)
 
-Профессиональный пайплайн без MoviePy (стабильнее на сервере):
+Professional pipeline without MoviePy (more stable on servers):
 
-- 1080×1920, 30fps
-- 3 Pexels-клипа с zoom + fade + xfade
-- ElevenLabs with-timestamps → ASS karaoke
-- loudnorm голоса + тихая музыка с fade
-- vignette + color grade
-- upload как публичный Short
+- 3 Pexels clips with zoom + fade + xfade
+- Karaoke captions
+- Loudnorm voice + quieter music with fade
+- Upload as a public Short
 
-## Важно
+## Notes
 
-- FFmpeg **не** живёт на Vercel serverless — воркер отдельно (Railway / VPS / локально).
-- YouTube refresh token выдаётся только при `prompt=consent` (уже включено).
-- На бесплатном ElevenLabs есть лимит символов/месяц.
+- FFmpeg does **not** run on Vercel serverless — the worker runs separately (Railway / VPS / local).
+- YouTube refresh tokens need `prompt=consent` (already enabled).
+- Free ElevenLabs plans have a monthly character limit.
+- Instagram and Avatar / HeyGen were removed from the product.

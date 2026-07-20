@@ -10,6 +10,7 @@ import {
   jobProgressPercent,
   statusColor,
 } from "@/lib/job-status";
+import { useToast } from "@/components/ToastNotice";
 
 const ASPECTS = [
   { id: "9:16", label: "9:16", hint: "Vertical" },
@@ -145,7 +146,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   const [durationId, setDurationId] = useState<DurationId>("auto");
   const [openChip, setOpenChip] = useState<"format" | "duration" | null>(null);
   const [creating, setCreating] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const { show: toast, notice } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const activeJobs = useMemo(
@@ -197,11 +198,10 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   async function createVideo() {
     const text = prompt.trim();
     if (text.length < 8) {
-      setMsg("Describe the video in at least one sentence.");
+      toast("Describe the video in at least one sentence.", "error");
       return;
     }
     setCreating(true);
-    setMsg(null);
     setOpenChip(null);
 
     const duration_auto = durationId === "auto";
@@ -221,30 +221,31 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     const data = await res.json();
     setCreating(false);
     if (!res.ok) {
-      setMsg(data.error || "Could not start generation");
+      toast(data.error || "Failed to start generation", "error");
       return;
     }
     setPrompt("");
-    setMsg("Video generation started — full file stays in your library.");
+    toast("Generation started - the video will appear in your library.", "info");
     await refreshJobs();
   }
 
   async function removeCreation(jobId: string) {
     if (!confirm("Remove this video from your library?")) return;
     setBusyId(jobId);
-    setMsg(null);
     const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     setBusyId(null);
     if (!res.ok) {
-      setMsg(data.error || "Could not delete");
+      toast(data.error || "Failed to delete", "error");
       return;
     }
     setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    toast("Video deleted.");
   }
 
   return (
     <div className="relative flex min-h-[calc(100vh-2rem)] flex-col gap-8 pb-28">
+      {notice}
       <header className="rise space-y-1">
         <h1
           className="font-[family-name:var(--font-syne)] text-3xl tracking-tight"
@@ -253,16 +254,10 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
           Creativity
         </h1>
         <p className="max-w-xl text-sm text-[color:var(--muted)]">
-          Create full videos from a prompt only — language is detected automatically,
-          AI invents the title. Not linked to YouTube or AI Training.
+          Create a video from a prompt - language is detected automatically, AI
+          invents the title. Not linked to YouTube or AI Training.
         </p>
       </header>
-
-      {msg && (
-        <p className="text-sm" style={{ color: "var(--accent)" }}>
-          {msg}
-        </p>
-      )}
 
       {/* Prompt composer with inline format / duration chips */}
       <section className="rise space-y-3">
@@ -408,6 +403,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       <video
                         key={job.id}
                         src={mediaSrc}
+                        poster={job.thumbnail_url || undefined}
                         className="h-full w-full object-contain bg-black"
                         controls
                         playsInline
@@ -430,7 +426,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                                   onClick: () =>
                                     void downloadVideo(
                                       job.id,
-                                      `${(job.title || "orzuvideo").replace(/[^\w\-]+/g, "_").slice(0, 40)}.mp4`,
+                                      `${(job.title || "orzuai").replace(/[^\w\-]+/g, "_").slice(0, 40)}.mp4`,
                                     ),
                                 },
                                 {

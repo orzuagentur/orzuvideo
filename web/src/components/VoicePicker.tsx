@@ -1,14 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useToast } from "@/components/ToastNotice";
 
 type VoiceItem = {
   id: string;
   name: string;
   category: string | null;
   labels: string | null;
+  gender: string | null;
+  accent: string | null;
+  age: string | null;
   preview_url: string | null;
+  source?: "account" | "shared";
 };
+
+type GenderFilter = "all" | "male" | "female" | "neutral";
 
 export function VoicePicker({
   value,
@@ -17,46 +24,65 @@ export function VoicePicker({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const { show: toast, notice } = useToast();
   const [voices, setVoices] = useState<VoiceItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [q, setQ] = useState("");
+  const [gender, setGender] = useState<GenderFilter>("all");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const load = useCallback(async (search: string, g: GenderFilter) => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (search.trim()) params.set("q", search.trim());
+      if (g !== "all") params.set("gender", g);
+      const res = await fetch(`/api/elevenlabs/voices?${params}`);
+      const data = await res.json();
+      if (!res.ok) {
+        toast(data.error || "Failed to load voices", "error");
+        setVoices([]);
+        return;
+      }
+      const list = (data.voices || []) as VoiceItem[];
+      setVoices(list);
+    } catch {
+      toast("Network error while loading voices", "error");
+      setVoices([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setErr(null);
-      try {
-        const res = await fetch("/api/elevenlabs/voices");
-        const data = await res.json();
-        if (cancelled) return;
-        if (!res.ok) {
-          setErr(data.error || "Could not load voices");
-          setVoices([]);
-          return;
-        }
-        const list = (data.voices || []) as VoiceItem[];
-        setVoices(list);
-        if (value && !list.some((v) => v.id === value) && list[0]) {
-          /* keep custom id if not in list */
-        } else if (!value && list[0]) {
-          onChange(list[0].id);
-        }
-      } catch {
-        if (!cancelled) setErr("Network error loading voices");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+    void load("", "all");
     return () => {
-      cancelled = true;
       audioRef.current?.pause();
+      if (debounceRef.current) clearTimeout(debounceRef.current);
     };
+  }, [load]);
+
+  // Auto-select first voice only when empty and list arrives
+  useEffect(() => {
+    if (!value && voices[0]) onChange(voices[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [voices]);
+
+  function onSearchChange(next: string) {
+    setQ(next);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void load(next, gender);
+    }, 320);
+  }
+
+  function onGenderChange(next: GenderFilter) {
+    setGender(next);
+    void load(q, next);
+  }
 
   const stop = useCallback(() => {
     audioRef.current?.pause();
@@ -71,7 +97,6 @@ export function VoicePicker({
     }
     stop();
     setLoadingId(voice.id);
-    setErr(null);
     try {
       let src = voice.preview_url;
       if (!src) {
@@ -84,7 +109,7 @@ export function VoicePicker({
         } else {
           const data = await res.json();
           if (!res.ok) {
-            setErr(data.error || "Preview failed");
+            toast(data.error || "Failed to preview", "error");
             setLoadingId(null);
             return;
           }
@@ -96,45 +121,78 @@ export function VoicePicker({
       audio.onended = () => setPlayingId(null);
       audio.onerror = () => {
         setPlayingId(null);
-        setErr("Playback failed");
+        toast("Playback error", "error");
       };
       setPlayingId(voice.id);
       await audio.play();
     } catch {
-      setErr("Could not play preview");
+      toast("Failed to preview", "error");
       setPlayingId(null);
     } finally {
       setLoadingId(null);
     }
   }
 
+  const filters: { id: GenderFilter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "male", label: "Male" },
+    { id: "female", label: "Female" },
+    { id: "neutral", label: "Neutral" },
+  ];
+
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-[color:var(--muted)]">Voice</span>
-        {loading && (
-          <span className="text-xs text-[color:var(--muted)]">Loading from ElevenLabs...</span>
-        )}
+    <div className="space-y-3">
+      {notice}
+      <input
+        className="field w-full text-sm"
+        placeholder="Search voice"
+        value={q}
+        onChange={(e) => onSearchChange(e.target.value)}
+      />
+
+      <div className="flex flex-wrap gap-1.5">
+        {filters.map((f) => {
+          const on = gender === f.id;
+          return (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => onGenderChange(f.id)}
+              className="rounded-full border px-3 py-1 text-xs transition"
+              style={{
+                borderColor: on ? "rgba(232,165,75,0.55)" : "var(--line)",
+                background: on ? "rgba(232,165,75,0.14)" : "transparent",
+                color: on ? "var(--accent)" : "var(--muted)",
+              }}
+            >
+              {f.label}
+            </button>
+          );
+        })}
       </div>
 
-      {err && <p className="text-xs text-[color:var(--danger)]">{err}</p>}
-
       {!loading && voices.length === 0 && (
-        <p className="text-sm text-[color:var(--muted)]">No voices found.</p>
+        <p className="text-sm text-[color:var(--muted)]">
+          No voices found. Change the filter or search.
+        </p>
       )}
 
-      <div className="max-h-[320px] space-y-1.5 overflow-y-auto rounded-xl border border-[color:var(--line)] p-2">
+      <div className="max-h-[360px] space-y-1.5 overflow-y-auto rounded-xl border border-[color:var(--line)] p-2">
         {voices.map((v) => {
-          const selected = value === v.id;
+          const isSelected = value === v.id;
           const playing = playingId === v.id;
           const busy = loadingId === v.id;
           return (
             <div
-              key={v.id}
+              key={`${v.source || "v"}-${v.id}`}
               className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition"
               style={{
-                background: selected ? "rgba(232,165,75,0.12)" : "transparent",
-                border: `1px solid ${selected ? "rgba(232,165,75,0.45)" : "transparent"}`,
+                background: isSelected
+                  ? "rgba(232,165,75,0.12)"
+                  : "transparent",
+                border: `1px solid ${
+                  isSelected ? "rgba(232,165,75,0.45)" : "transparent"
+                }`,
               }}
             >
               <button
@@ -159,19 +217,28 @@ export function VoicePicker({
               <button
                 type="button"
                 className="min-w-0 flex-1 text-left"
-                onClick={() => {
-                  onChange(v.id);
-                }}
+                onClick={() => onChange(v.id)}
               >
-                <span className="block truncate text-sm font-medium">{v.name}</span>
+                <span className="block truncate text-sm font-medium">
+                  {v.name}
+                  {v.source === "shared" ? (
+                    <span className="ml-1 text-[10px] font-normal text-[color:var(--muted)]">
+                      shared
+                    </span>
+                  ) : null}
+                </span>
                 <span className="block truncate text-[11px] text-[color:var(--muted)]">
-                  {[v.category, v.labels].filter(Boolean).join(" · ") || v.id}
+                  {[v.gender, v.accent, v.age, v.category]
+                    .filter(Boolean)
+                    .join(" · ") ||
+                    v.labels ||
+                    v.id}
                 </span>
               </button>
 
-              {selected && (
+              {isSelected && (
                 <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
-                  Selected
+                  ✓
                 </span>
               )}
             </div>

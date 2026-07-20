@@ -75,7 +75,7 @@ export async function GET(request: Request, { params }: Params) {
       return new NextResponse(buf, {
         headers: {
           "Content-Type": "video/mp4",
-          "Content-Disposition": `attachment; filename="orzuvideo-${id.slice(0, 8)}.mp4"`,
+          "Content-Disposition": `attachment; filename="orzuai-${id.slice(0, 8)}.mp4"`,
           "Cache-Control": "private, max-age=60",
         },
       });

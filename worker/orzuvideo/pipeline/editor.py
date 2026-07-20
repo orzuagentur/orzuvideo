@@ -130,7 +130,7 @@ def burn_subtitles_and_mux(
             "-preset",
             "medium",
             "-crf",
-            "17",
+            "20",
             "-pix_fmt",
             "yuv420p",
             "-c:a",

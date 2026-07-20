@@ -22,6 +22,7 @@ export async function POST(request: Request) {
     aspect_ratio?: string;
     source?: string;
     pipeline?: string;
+    mode?: "ai_auto" | "ai_prompt" | string;
   } = {};
   try {
     const text = await request.text();
@@ -33,15 +34,30 @@ export async function POST(request: Request) {
   const brief = String(body.brief || "").trim();
   const source = String(body.source || "").trim();
   const pipeline = String(body.pipeline || "").trim();
+  const mode = String(body.mode || "").trim();
   const isCreativity = source === "creativity" || pipeline === "creativity";
-  // Creativity is platform-only — never YouTube publish, never AI Training
-  const publish = isCreativity ? false : body.publish !== false;
+  // YouTube AI auto = niche from AI Training, no user prompt required
+  const isYoutubeAiAuto =
+    !isCreativity &&
+    (mode === "ai_auto" || source === "youtube_ai" || source === "dashboard_auto");
+  const isYoutubePrompt =
+    !isCreativity &&
+    (mode === "ai_prompt" || source === "youtube_prompt" || source === "dashboard");
+
+  // Creativity is platform-only; YouTube modes always publish
+  const publish = isCreativity
+    ? false
+    : isYoutubeAiAuto || isYoutubePrompt
+      ? true
+      : body.publish !== false;
 
   const durationAuto =
     body.duration_auto === true ||
     body.duration_seconds === "auto" ||
     body.duration_seconds === null ||
-    (isCreativity && body.duration_seconds === undefined && body.duration_auto !== false);
+    (isCreativity &&
+      body.duration_seconds === undefined &&
+      body.duration_auto !== false);
 
   let duration_seconds: number | null = null;
   if (!durationAuto) {
@@ -52,17 +68,22 @@ export async function POST(request: Request) {
   const aspect = String(body.aspect_ratio || "9:16").trim();
   const aspect_ratio = ASPECTS.has(aspect) ? aspect : "9:16";
 
-  if (!brief) {
-    return NextResponse.json(
-      { error: "Write a prompt for the video first" },
-      { status: 400 },
-    );
-  }
-  if (brief.length < 8) {
-    return NextResponse.json(
-      { error: "Prompt is too short — describe the video in at least one sentence" },
-      { status: 400 },
-    );
+  if (isCreativity || isYoutubePrompt) {
+    if (!brief) {
+      return NextResponse.json(
+        { error: "Write a prompt for the video first" },
+        { status: 400 },
+      );
+    }
+    if (brief.length < 8) {
+      return NextResponse.json(
+        {
+          error:
+            "Prompt is too short — describe the video in at least one sentence",
+        },
+        { status: 400 },
+      );
+    }
   }
 
   let channelId: string | null = null;
@@ -101,19 +122,29 @@ export async function POST(request: Request) {
     }
   }
 
+  const resolvedSource = isCreativity
+    ? "creativity"
+    : isYoutubeAiAuto
+      ? "youtube_ai"
+      : isYoutubePrompt
+        ? "youtube_prompt"
+        : publish
+          ? "dashboard"
+          : "content_plus";
+
   const metadata: Record<string, unknown> = {
     publish,
-    source: isCreativity ? "creativity" : publish ? "dashboard" : "content_plus",
+    source: resolvedSource,
     pipeline: isCreativity ? "creativity" : "youtube",
-    user_brief: brief,
+    mode: isYoutubeAiAuto ? "ai_auto" : isYoutubePrompt ? "ai_prompt" : mode || null,
+    user_brief: brief || null,
     duration_auto: durationAuto,
     duration_seconds: durationAuto ? null : duration_seconds,
     aspect_ratio,
-    used_ai_training: false,
+    used_ai_training: !isCreativity,
   };
   if (!isCreativity) {
     metadata.youtube_channel_id = channelId;
-    metadata.used_ai_training = true;
   }
 
   const { data, error } = await supabase
@@ -124,7 +155,6 @@ export async function POST(request: Request) {
       status: "queued",
       scheduled_for: new Date().toISOString(),
       duration_seconds: duration_seconds,
-      // Title filled by worker AI after script generation
       title: null,
       metadata,
     })
@@ -138,10 +168,10 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     job_id: data.id,
-    publish: false,
+    publish,
     duration_auto: durationAuto,
     duration_seconds,
     aspect_ratio,
-    source: isCreativity ? "creativity" : metadata.source,
+    source: resolvedSource,
   });
 }

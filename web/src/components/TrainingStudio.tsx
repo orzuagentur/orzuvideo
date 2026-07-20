@@ -3,10 +3,11 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { AiTraining, PublishSchedule } from "@/lib/types";
 import {
   ScheduleStudio,
@@ -14,15 +15,17 @@ import {
   scheduleDefaults,
 } from "@/components/ScheduleStudio";
 import { VoicePicker } from "@/components/VoicePicker";
+import { MusicTrainingStudio } from "@/components/MusicTrainingStudio";
+import { useToast } from "@/components/ToastNotice";
 import {
   AUDIENCE_PRESETS,
   BRAND_RULES_PRESETS,
   CONTENT_TYPE_PRESETS,
   CTA_PRESETS,
-  DURATION_PRESETS,
+  defaultDurationForFormat,
+  durationPresetsForFormat,
   HOOK_PRESETS,
   LANGUAGE_PRESETS,
-  MUSIC_MOOD_PRESETS,
   NICHE_PRESETS,
   PEXELS_PRESETS,
   REPLY_STYLE_PRESETS,
@@ -31,34 +34,20 @@ import {
   TONE_PRESETS,
   VIDEO_FORMAT_PRESETS,
   VIDEO_STYLE_PRESETS,
-  VOICE_PRESETS,
   ensurePreset,
   type Preset,
 } from "@/lib/training-presets";
-
-const trainingDefaults: AiTraining = {
-  niche: "motivation",
-  content_type: "motivational_quotes",
-  style_prompt: STYLE_PROMPT_PRESETS[0].value,
-  tone: "powerful",
-  language: "en",
-  target_audience: "ambitious young men 18-35",
-  hook_style: "bold opening challenge",
-  cta: "Follow for daily fire",
-  pexels_query: "cinematic man walking city night",
-  music_mood: "motivational epic",
-  voice_id: VOICE_PRESETS[0].value,
-  subtitle_style: "karaoke_bold",
-  duration_seconds: 45,
-  video_format: "shorts",
-  video_style: "cinematic_mixer",
-  reply_comments_enabled: false,
-  reply_languages: "auto",
-  reply_style_prompt: REPLY_STYLE_PRESETS[0].value,
-  learning_enabled: false,
-  brand_rules: BRAND_RULES_PRESETS[0].value,
-  is_trained: false,
-};
+import {
+  trainingChecklist,
+  trainingEmptyDefaults,
+  trainingRequiredComplete,
+} from "@/lib/training-required";
+import {
+  clampMusicVolume,
+  clampVoiceVolume,
+  defaultMusicPrefs,
+  type MusicPrefs,
+} from "@/lib/music-groups";
 
 function snapshot(training: AiTraining, schedule: PublishSchedule) {
   return JSON.stringify({ training, schedule: normalizeSchedule(schedule) });
@@ -75,21 +64,60 @@ export function TrainingStudio({
   channelTitle?: string | null;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const enableAiFlow = searchParams.get("enableAi") === "1";
+
   const [form, setForm] = useState<AiTraining>({
-    ...trainingDefaults,
+    ...trainingEmptyDefaults,
     ...initial,
     learning_enabled: false,
+    music_prefs: {
+      ...defaultMusicPrefs(),
+      ...(initial?.music_prefs || {}),
+      volume: clampMusicVolume(
+        Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
+      ),
+      voice_volume: clampVoiceVolume(
+        Number(
+          initial?.voice_volume ??
+            initial?.music_prefs?.voice_volume ??
+            1.05,
+        ),
+      ),
+      active_group_id:
+        initial?.music_group ||
+        initial?.music_prefs?.active_group_id ||
+        "epic",
+    },
+    music_group: initial?.music_group || initial?.music_prefs?.active_group_id || "epic",
+    music_volume: clampMusicVolume(
+      Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
+    ),
+    voice_volume: clampVoiceVolume(
+      Number(
+        initial?.voice_volume ?? initial?.music_prefs?.voice_volume ?? 1.05,
+      ),
+    ),
   });
   const [schedule, setSchedule] = useState<PublishSchedule>(() =>
-    normalizeSchedule({ ...scheduleDefaults, ...scheduleInitial }),
+    normalizeSchedule({
+      ...scheduleDefaults,
+      ...scheduleInitial,
+      // Schedule UI has no toggle; Channel controls on/off. Keep existing flag.
+      enabled: scheduleInitial?.enabled ?? false,
+    }),
   );
   const savedRef = useRef(snapshot(form, schedule));
+  const { show: toast, notice } = useToast();
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState<string | null>(null);
   const [leavePrompt, setLeavePrompt] = useState<string | null>(null);
+  const [checklistOpen, setChecklistOpen] = useState(enableAiFlow);
   const allowLeaveRef = useRef(false);
+
+  const checklist = useMemo(() => trainingChecklist(form), [form]);
+  const requiredOk = trainingRequiredComplete(form);
+  const checklistDone = checklist.filter((c) => c.done).length;
 
   const markDirty = useCallback(
     (nextForm: AiTraining, nextSchedule: PublishSchedule) => {
@@ -110,7 +138,10 @@ export function TrainingStudio({
   }
 
   function onScheduleChange(next: PublishSchedule) {
-    const normalized = normalizeSchedule(next);
+    const normalized = normalizeSchedule({
+      ...next,
+      enabled: schedule.enabled,
+    });
     setSchedule(normalized);
     markDirty(form, normalized);
   }
@@ -118,21 +149,45 @@ export function TrainingStudio({
   async function saveAll(options?: {
     goToChannel?: boolean;
   }): Promise<boolean> {
-    setBusy(true);
-    setError(null);
-    setOk(null);
-
-    const schedulePayload = normalizeSchedule(schedule);
-    if (schedulePayload.enabled) {
-      const unique = new Set(schedulePayload.times);
-      if (unique.size !== schedulePayload.times.length) {
-        setError("Each publish time must be different.");
-        setBusy(false);
-        return false;
-      }
+    if (!requiredOk) {
+      toast("Fill in the required fields first (checklist at bottom right).", "error");
+      setChecklistOpen(true);
+      return false;
     }
 
-    const trainingBody = { ...form, learning_enabled: false };
+    setBusy(true);
+
+    const schedulePayload = normalizeSchedule({
+      ...schedule,
+      enabled: enableAiFlow ? true : schedule.enabled,
+    });
+    const unique = new Set(schedulePayload.times);
+    if (unique.size !== schedulePayload.times.length) {
+      toast("Each publish time must be different.", "error");
+      setBusy(false);
+      return false;
+    }
+
+    const musicPrefs: MusicPrefs = {
+      ...defaultMusicPrefs(),
+      ...(form.music_prefs || {}),
+      active_group_id: form.music_group || form.music_prefs?.active_group_id || "epic",
+      volume: clampMusicVolume(Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58)),
+      voice_volume: clampVoiceVolume(
+        Number(form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05),
+      ),
+    };
+
+    const trainingBody = {
+      ...form,
+      learning_enabled: false,
+      enable_ai: enableAiFlow || undefined,
+      music_group: musicPrefs.active_group_id,
+      music_volume: musicPrefs.volume,
+      voice_volume: musicPrefs.voice_volume,
+      music_mood: musicPrefs.active_group_id,
+      music_prefs: musicPrefs,
+    };
 
     const [trainRes, schedRes] = await Promise.all([
       fetch("/api/training", {
@@ -152,20 +207,30 @@ export function TrainingStudio({
     setBusy(false);
 
     if (!trainRes.ok) {
-      setError(trainData.error || "Training save failed");
+      toast(trainData.error || "Failed to save Training", "error");
       return false;
     }
     if (!schedRes.ok) {
-      setError(schedData.error || "Schedule save failed");
+      toast(schedData.error || "Failed to save schedule", "error");
       return false;
     }
 
-    savedRef.current = snapshot(trainingBody, schedulePayload);
-    setForm(trainingBody);
-    setSchedule(schedulePayload);
+    const savedSchedule = enableAiFlow
+      ? { ...schedulePayload, enabled: true }
+      : schedulePayload;
+    savedRef.current = snapshot(
+      { ...form, learning_enabled: false, is_trained: true },
+      savedSchedule,
+    );
+    setForm((p) => ({ ...p, is_trained: true, learning_enabled: false }));
+    setSchedule(savedSchedule);
     setDirty(false);
-    setOk("Saved.");
-    if (options?.goToChannel) {
+    toast(
+      enableAiFlow
+        ? "Saved. AI content enabled."
+        : "Saved.",
+    );
+    if (options?.goToChannel || enableAiFlow) {
       allowLeaveRef.current = true;
       router.push("/dashboard/channel");
       router.refresh();
@@ -184,7 +249,6 @@ export function TrainingStudio({
     router.push("/dashboard/channel");
   }
 
-  // Browser tab close / refresh
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
       if (!dirty || allowLeaveRef.current) return;
@@ -195,7 +259,6 @@ export function TrainingStudio({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  // Intercept in-app link clicks while dirty
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (!dirty || allowLeaveRef.current) return;
@@ -205,7 +268,6 @@ export function TrainingStudio({
       const href = anchor.getAttribute("href");
       if (!href || href.startsWith("#") || href.startsWith("mailto:")) return;
       if (anchor.target === "_blank") return;
-      // same-page hash only
       try {
         const url = new URL(href, window.location.origin);
         if (
@@ -245,22 +307,25 @@ export function TrainingStudio({
   }
 
   return (
-    <div className="space-y-6">
-      <header className="rise flex flex-wrap items-end justify-between gap-3">
+    <div className="relative space-y-6 pb-24">
+      {notice}
+      <header className="sticky top-0 z-30 -mx-1 mb-2 flex flex-wrap items-end justify-between gap-3 border-b border-[color:var(--line)] bg-[color:var(--bg)]/95 px-1 py-3 backdrop-blur-md">
         <div className="min-w-0 flex-1">
           <button
             type="button"
             onClick={goBack}
-            className="mb-3 inline-flex items-center gap-1.5 rounded-full border border-[color:var(--line)] bg-black/20 px-3 py-1.5 text-sm text-[color:var(--muted)] transition hover:border-[color:rgba(232,165,75,0.4)] hover:text-[color:var(--fg)]"
+            className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-[color:var(--line)] bg-black/20 px-3 py-1.5 text-sm text-[color:var(--muted)] transition hover:border-[color:rgba(232,165,75,0.4)] hover:text-[color:var(--fg)]"
           >
             <span aria-hidden>←</span>
             Back
           </button>
           <h1 className="text-2xl font-semibold">AI Training</h1>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            {channelTitle
-              ? `Settings for ${channelTitle}`
-              : "Schedule, style, voice, and comments."}
+            {enableAiFlow
+              ? "Fill required fields and press Save - AI content will turn on."
+              : channelTitle
+                ? `Settings for ${channelTitle}`
+                : "Schedule, style, voice, and comments."}
             {dirty && (
               <span className="ml-2 text-[color:var(--accent)]">
                 Unsaved changes
@@ -270,13 +335,20 @@ export function TrainingStudio({
         </div>
         <button
           type="button"
-          className="btn btn-primary"
-          disabled={busy || !dirty}
+          className="btn btn-primary shrink-0"
+          disabled={busy || (!dirty && !enableAiFlow) || !requiredOk}
           onClick={() => void saveAll({ goToChannel: true })}
         >
           {busy ? "Saving..." : "Save"}
         </button>
       </header>
+
+      {enableAiFlow && (
+        <p className="rounded-xl border border-[color:rgba(232,165,75,0.35)] bg-[color:rgba(232,165,75,0.08)] px-4 py-3 text-sm">
+          First AI content launch: check the items in the checklist (bottom right),
+          then Save.
+        </p>
+      )}
 
       <section id="schedule" className="scroll-mt-8">
         <ScheduleStudio value={schedule} onChange={onScheduleChange} />
@@ -284,55 +356,72 @@ export function TrainingStudio({
 
       <div className="space-y-6">
         <section className="panel rise space-y-5 p-6">
-          <SectionTitle title="Content" subtitle="What kind of Shorts to make" />
+          <SectionTitle
+            title="Content"
+            subtitle="Fill in the required fields. The rest can be left empty."
+            required
+          />
           <div className="grid gap-5 sm:grid-cols-2">
             <PresetSelect
               label="Niche"
               value={form.niche}
               presets={ensurePreset(NICHE_PRESETS, form.niche)}
               onChange={(v) => setTraining("niche", v)}
+              required
             />
             <PresetSelect
               label="Content type"
               value={form.content_type}
               presets={ensurePreset(CONTENT_TYPE_PRESETS, form.content_type)}
               onChange={(v) => setTraining("content_type", v)}
+              optional
             />
             <PresetSelect
               label="Format"
               value={form.video_format}
               presets={ensurePreset(VIDEO_FORMAT_PRESETS, form.video_format)}
-              onChange={(v) => setTraining("video_format", v)}
+              onChange={(v) => {
+                const next = { ...form, video_format: v };
+                const allowed = durationPresetsForFormat(v).map((p) => p.value);
+                if (!allowed.includes(String(form.duration_seconds))) {
+                  next.duration_seconds = defaultDurationForFormat(v);
+                }
+                setForm(next);
+              }}
             />
             <PresetSelect
               label="Edit style"
               value={form.video_style}
               presets={ensurePreset(VIDEO_STYLE_PRESETS, form.video_style)}
               onChange={(v) => setTraining("video_style", v)}
+              optional
             />
             <PresetSelect
               label="Tone"
               value={form.tone}
               presets={ensurePreset(TONE_PRESETS, form.tone)}
               onChange={(v) => setTraining("tone", v)}
+              optional
             />
             <PresetSelect
               label="Language"
               value={form.language}
               presets={ensurePreset(LANGUAGE_PRESETS, form.language)}
               onChange={(v) => setTraining("language", v)}
+              required
             />
             <PresetSelect
               label="Audience"
               value={form.target_audience}
               presets={ensurePreset(AUDIENCE_PRESETS, form.target_audience)}
               onChange={(v) => setTraining("target_audience", v)}
+              optional
             />
             <PresetSelect
               label="Duration"
               value={String(form.duration_seconds)}
               presets={ensurePreset(
-                DURATION_PRESETS,
+                durationPresetsForFormat(form.video_format),
                 String(form.duration_seconds),
               )}
               onChange={(v) => setTraining("duration_seconds", Number(v))}
@@ -342,12 +431,15 @@ export function TrainingStudio({
               value={form.hook_style}
               presets={ensurePreset(HOOK_PRESETS, form.hook_style)}
               onChange={(v) => setTraining("hook_style", v)}
+              optional
             />
             <PresetSelect
               label="CTA"
               value={form.cta}
               presets={ensurePreset(CTA_PRESETS, form.cta)}
               onChange={(v) => setTraining("cta", v)}
+              optional
+              hint="AI will translate the CTA into the selected language"
             />
           </div>
 
@@ -358,47 +450,74 @@ export function TrainingStudio({
               presets={ensurePreset(STYLE_PROMPT_PRESETS, form.style_prompt)}
               onChange={(v) => setTraining("style_prompt", v)}
               multiline
+              required
             />
           </div>
         </section>
 
         <section className="panel rise space-y-5 p-6">
-          <SectionTitle
-            title="Voice & media"
-            subtitle="How it sounds and looks"
-          />
+          <SectionTitle title="Voice" required />
           <VoicePicker
             value={form.voice_id}
             onChange={(v) => setTraining("voice_id", v)}
           />
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-5 border-t border-[color:var(--line)] pt-5 sm:grid-cols-2">
             <PresetSelect
               label="Subtitles"
               value={form.subtitle_style}
               presets={ensurePreset(SUBTITLE_PRESETS, form.subtitle_style)}
               onChange={(v) => setTraining("subtitle_style", v)}
-            />
-            <PresetSelect
-              label="Music mood"
-              value={form.music_mood}
-              presets={ensurePreset(MUSIC_MOOD_PRESETS, form.music_mood)}
-              onChange={(v) => setTraining("music_mood", v)}
+              optional
             />
             <div className="sm:col-span-2">
               <PresetSelect
-                label="B-roll (Pexels)"
+                label="B-roll"
                 value={form.pexels_query}
                 presets={ensurePreset(PEXELS_PRESETS, form.pexels_query)}
                 onChange={(v) => setTraining("pexels_query", v)}
+                optional
               />
             </div>
           </div>
         </section>
 
+        <MusicTrainingStudio
+          voiceId={form.voice_id}
+          required
+          value={{
+            ...defaultMusicPrefs(),
+            ...(form.music_prefs || {}),
+            active_group_id:
+              form.music_group || form.music_prefs?.active_group_id || "epic",
+            volume: clampMusicVolume(
+              Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58),
+            ),
+            voice_volume: clampVoiceVolume(
+              Number(
+                form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05,
+              ),
+            ),
+          }}
+          onChange={(next) => {
+            setForm((prev) => {
+              const updated = {
+                ...prev,
+                music_group: next.active_group_id,
+                music_volume: next.volume,
+                voice_volume: next.voice_volume,
+                music_mood: next.active_group_id,
+                music_prefs: next,
+              };
+              markDirty(updated, schedule);
+              return updated;
+            });
+          }}
+        />
+
         <section className="panel rise space-y-5 p-6">
           <SectionTitle
             title="Brand rules"
-            subtitle="What the AI must never do"
+            subtitle="Optional - can be left empty"
           />
           <PresetSelect
             label="Preset"
@@ -406,12 +525,20 @@ export function TrainingStudio({
             presets={ensurePreset(BRAND_RULES_PRESETS, form.brand_rules)}
             onChange={(v) => setTraining("brand_rules", v)}
             multiline
+            optional
           />
         </section>
 
         <section className="panel rise space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold">Comments</p>
+            <div>
+              <p className="text-sm font-semibold">Comments</p>
+              <p className="mt-0.5 text-[11px] text-[color:var(--muted)]">
+                When on, the worker reads new comments and AI-replies. You can also
+                reply from each video in Channel. YouTube API cannot like/heart
+                comments — only replies.
+              </p>
+            </div>
             <button
               type="button"
               role="switch"
@@ -465,25 +592,84 @@ export function TrainingStudio({
                   )}
                   onChange={(v) => setTraining("reply_style_prompt", v)}
                   multiline
+                  optional
                 />
               </div>
             </div>
           )}
         </section>
+      </div>
 
-        {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
-        {ok && <p className="text-sm text-[color:var(--success)]">{ok}</p>}
-
-        <div className="sticky bottom-4 z-10 flex justify-end">
-          <button
-            type="button"
-            className="btn btn-primary shadow-lg"
-            disabled={busy || !dirty}
-            onClick={() => void saveAll({ goToChannel: true })}
+      {/* Floating checklist FAB — bottom right */}
+      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6">
+        {checklistOpen && (
+          <div
+            className="w-[min(100vw-2.5rem,280px)] rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-4 shadow-2xl backdrop-blur-md"
+            role="dialog"
+            aria-label="Required checklist"
           >
-            {busy ? "Saving..." : "Save"}
-          </button>
-        </div>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold">Required</p>
+              <span className="text-xs tabular-nums text-[color:var(--muted)]">
+                {checklistDone}/{checklist.length}
+              </span>
+            </div>
+            <ul className="space-y-2">
+              {checklist.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]"
+                    style={{
+                      background: item.done
+                        ? "rgba(74,222,128,0.2)"
+                        : "rgba(255,255,255,0.06)",
+                      color: item.done ? "var(--success)" : "var(--muted)",
+                      border: `1px solid ${
+                        item.done
+                          ? "rgba(74,222,128,0.45)"
+                          : "var(--line)"
+                      }`,
+                    }}
+                  >
+                    {item.done ? "✓" : ""}
+                  </span>
+                  <span
+                    style={{
+                      color: item.done ? "var(--fg)" : "var(--muted)",
+                    }}
+                  >
+                    {item.label}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11px] leading-snug text-[color:var(--muted)]">
+              Optional fields can be left empty. AI texts will be in
+              the selected Language.
+            </p>
+          </div>
+        )}
+        <button
+          type="button"
+          aria-label="Required checklist"
+          aria-expanded={checklistOpen}
+          onClick={() => setChecklistOpen((v) => !v)}
+          className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105"
+          style={{
+            background: requiredOk
+              ? "linear-gradient(135deg, var(--accent-dim), var(--accent))"
+              : "rgba(232,165,75,0.25)",
+            border: "1px solid rgba(232,165,75,0.55)",
+            color: requiredOk ? "#1a1208" : "var(--accent)",
+          }}
+        >
+          <span className="font-[family-name:var(--font-syne)] text-sm font-bold tabular-nums">
+            {checklistDone}/{checklist.length}
+          </span>
+        </button>
       </div>
 
       {leavePrompt !== null && (
@@ -560,11 +746,28 @@ function UnsavedCard({
   );
 }
 
-function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
+function SectionTitle({
+  title,
+  subtitle,
+  required = false,
+}: {
+  title: string;
+  subtitle?: string;
+  required?: boolean;
+}) {
   return (
     <div>
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="mt-0.5 text-sm text-[color:var(--muted)]">{subtitle}</p>
+      <h2 className="text-lg font-semibold">
+        {title}
+        {required ? (
+          <span className="ml-1" style={{ color: "var(--accent)" }} aria-hidden>
+            *
+          </span>
+        ) : null}
+      </h2>
+      {subtitle ? (
+        <p className="mt-0.5 text-sm text-[color:var(--muted)]">{subtitle}</p>
+      ) : null}
     </div>
   );
 }
@@ -575,22 +778,43 @@ function PresetSelect({
   presets,
   onChange,
   multiline = false,
+  optional = false,
+  required = false,
+  hint,
 }: {
   label: string;
   value: string;
   presets: Preset[];
   onChange: (v: string) => void;
   multiline?: boolean;
+  optional?: boolean;
+  required?: boolean;
+  hint?: string;
 }) {
-  const inList = presets.some((p) => p.value === value);
-  const [custom, setCustom] = useState(!inList);
+  const empty = !value;
+  const inList = !empty && presets.some((p) => p.value === value);
+  const [custom, setCustom] = useState(!empty && !inList);
+
+  useEffect(() => {
+    if (empty) setCustom(false);
+  }, [empty]);
 
   return (
     <div className="space-y-2">
-      <span className="text-sm font-medium text-[color:var(--muted)]">{label}</span>
+      <span className="text-sm font-medium text-[color:var(--muted)]">
+        {label}
+        {required ? (
+          <span className="ml-1" style={{ color: "var(--accent)" }} aria-hidden>
+            *
+          </span>
+        ) : null}
+        {optional && !required ? (
+          <span className="ml-1 font-normal opacity-70">(optional)</span>
+        ) : null}
+      </span>
       <select
         className="field text-[15px]"
-        value={custom ? "__own__" : value}
+        value={custom ? "__own__" : empty ? "" : value}
         onChange={(e) => {
           if (e.target.value === "__own__") {
             setCustom(true);
@@ -599,8 +823,11 @@ function PresetSelect({
           setCustom(false);
           onChange(e.target.value);
         }}
-        required={!custom}
       >
+        {(optional || !required) && (
+          <option value="">— Not set —</option>
+        )}
+        {required && empty && <option value="">— Choose —</option>}
         {presets.map((p) => (
           <option key={p.value} value={p.value} title={p.label}>
             {p.label}
@@ -608,13 +835,15 @@ function PresetSelect({
         ))}
         <option value="__own__">+ Own</option>
       </select>
+      {hint && (
+        <p className="text-[11px] text-[color:var(--muted)]">{hint}</p>
+      )}
       {custom &&
         (multiline ? (
           <textarea
             className="field min-h-24 text-[15px] leading-relaxed"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            required
             placeholder="Your value"
           />
         ) : (
@@ -622,7 +851,6 @@ function PresetSelect({
             className="field text-[15px]"
             value={inList ? "" : value}
             onChange={(e) => onChange(e.target.value)}
-            required
             placeholder="Your value"
           />
         ))}

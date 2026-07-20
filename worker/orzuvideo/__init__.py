@@ -1,4 +1,4 @@
-"""OrzuVideo worker — daily Shorts pipeline."""
+"""OrzuAi worker — daily Shorts pipeline."""
 
 from .config import settings
 from .runner import run_forever, process_next_job

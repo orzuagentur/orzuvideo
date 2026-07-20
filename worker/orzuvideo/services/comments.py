@@ -48,12 +48,12 @@ def generate_comment_reply(
     )
 
     client = OpenAI(api_key=settings.openai_api_key)
-    system = f"""You reply to YouTube comments for a Shorts channel.
+    system = f"""You reply to YouTube comments for a channel.
 Reply in the SAME language as the commenter (unless reply_languages is locked).
-Style: {training.get('reply_style_prompt')}
+Style: {training.get('reply_style_prompt') or 'Friendly, brief, on-brand'}
 Brand rules: {training.get('brand_rules') or 'none'}
-Niche: {training.get('niche')}
-Keep replies under 280 characters. No hashtags spam.
+Niche: {training.get('niche') or 'general'}
+Keep replies under 280 characters. No hashtag spam. No links unless asked.
 """
     user = f"""Comment author: {comment_author or 'viewer'}
 Comment: {comment_text}
