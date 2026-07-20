@@ -19,12 +19,12 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const enabled = Boolean(body.enabled);
-  const times = Array.isArray(body.times)
-    ? body.times.map(String)
+  const times: string[] = Array.isArray(body.times)
+    ? body.times.map((t: unknown) => String(t))
     : ["09:00", "18:00"];
   const videos_per_day = Math.min(10, Math.max(1, Number(body.videos_per_day) || 2));
-  let normalizedTimes = times
-    .map((t) => {
+  let normalizedTimes: string[] = times
+    .map((t: string) => {
       const [h, m] = String(t).trim().split(":");
       if (h == null) return "";
       return `${h.padStart(2, "0")}:${(m || "00").padStart(2, "0")}`;
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
   } else {
     // ensure unique when disabled too
     const seen = new Set<string>();
-    normalizedTimes = normalizedTimes.map((t, i) => {
+    normalizedTimes = normalizedTimes.map((t: string, i: number) => {
       let cur = t;
       while (seen.has(cur)) {
         cur = `${String((8 + i) % 24).padStart(2, "0")}:00`;
