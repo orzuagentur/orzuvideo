@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { playableObjectUrl } from "@/lib/media-url";
 
 export type MediaKind = "video" | "photo" | "music" | "all";
 
@@ -176,7 +177,7 @@ async function searchLibraryMusic(
   let query = supabase
     .from("music_tracks")
     .select(
-      "id,title,artist,mood,duration_sec,public_url,genre_id,music_genres(name)",
+      "id,title,artist,mood,duration_sec,public_url,storage_path,genre_id,music_genres(name)",
       { count: "exact" },
     )
     .eq("user_id", userId)
@@ -194,30 +195,36 @@ async function searchLibraryMusic(
   const { data, error, count } = await query;
   if (error) throw new Error(error.message);
 
-  const items: MediaCard[] = (data || []).map((t) => {
-    const g = t.music_genres as
-      | { name?: string }
-      | { name?: string }[]
-      | null;
-    const genreName = Array.isArray(g) ? g[0]?.name : g?.name;
-    return {
-      id: String(t.id),
-      kind: "music" as const,
-      title: t.title || "Track",
-      author: t.artist || "—",
-      thumb: null,
-      previewUrl: t.public_url || null,
-      downloadUrl: t.public_url || null,
-      durationSec: t.duration_sec ?? null,
-      width: null,
-      height: null,
-      pageUrl: null,
-      downloadAllowed: Boolean(t.public_url),
-      genre: genreName || null,
-      mood: t.mood || null,
-      genreId: t.genre_id || null,
-    };
-  });
+  const items: MediaCard[] = await Promise.all(
+    (data || []).map(async (t) => {
+      const g = t.music_genres as
+        | { name?: string }
+        | { name?: string }[]
+        | null;
+      const genreName = Array.isArray(g) ? g[0]?.name : g?.name;
+      const playUrl = await playableObjectUrl(
+        (t as { storage_path?: string | null }).storage_path,
+        t.public_url,
+      );
+      return {
+        id: String(t.id),
+        kind: "music" as const,
+        title: t.title || "Track",
+        author: t.artist || "—",
+        thumb: null,
+        previewUrl: playUrl,
+        downloadUrl: playUrl,
+        durationSec: t.duration_sec ?? null,
+        width: null,
+        height: null,
+        pageUrl: null,
+        downloadAllowed: Boolean(playUrl),
+        genre: genreName || null,
+        mood: t.mood || null,
+        genreId: t.genre_id || null,
+      };
+    }),
+  );
 
   return { items, total: count ?? items.length };
 }

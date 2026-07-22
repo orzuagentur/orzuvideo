@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { deleteObject, objectSizeBytes, r2Bucket, r2Configured } from "@/lib/r2";
+import { playableObjectUrl } from "@/lib/media-url";
 
 export const runtime = "nodejs";
 
@@ -97,32 +98,35 @@ export async function GET(request: Request) {
     );
   }
 
-  const items = rows.map((row) => {
-    const g = row.music_genres as
-      | { id: string; name: string; slug: string }
-      | { id: string; name: string; slug: string }[]
-      | null;
-    const genre = Array.isArray(g) ? g[0] : g;
-    return {
-      id: row.id,
-      title: row.title,
-      artist: row.artist,
-      mood: row.mood,
-      durationSec: row.duration_sec,
-      storagePath: row.storage_path,
-      storageBucket: row.storage_bucket,
-      publicUrl: row.public_url,
-      genreId: row.genre_id,
-      genreName: genre?.name || null,
-      genreSlug: genre?.slug || null,
-      fileSizeBytes: Number(
-        (row as { file_size_bytes?: number | null }).file_size_bytes || 0,
-      ),
-      createdAt: row.created_at,
-      previewUrl: row.public_url,
-      downloadUrl: row.public_url,
-    };
-  });
+  const items = await Promise.all(
+    rows.map(async (row) => {
+      const g = row.music_genres as
+        | { id: string; name: string; slug: string }
+        | { id: string; name: string; slug: string }[]
+        | null;
+      const genre = Array.isArray(g) ? g[0] : g;
+      const playUrl = await playableObjectUrl(row.storage_path, row.public_url);
+      return {
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        mood: row.mood,
+        durationSec: row.duration_sec,
+        storagePath: row.storage_path,
+        storageBucket: row.storage_bucket,
+        publicUrl: row.public_url,
+        genreId: row.genre_id,
+        genreName: genre?.name || null,
+        genreSlug: genre?.slug || null,
+        fileSizeBytes: Number(
+          (row as { file_size_bytes?: number | null }).file_size_bytes || 0,
+        ),
+        createdAt: row.created_at,
+        previewUrl: playUrl,
+        downloadUrl: playUrl,
+      };
+    }),
+  );
 
   return NextResponse.json({
     items,

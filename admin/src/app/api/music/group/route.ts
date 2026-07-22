@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { playableObjectUrl } from "@/lib/media-url";
 
 /**
  * Tracks for AI Training / pickers — from own R2 library by genre slug or id.
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from("music_tracks")
     .select(
-      "id,title,artist,mood,duration_sec,public_url,genre_id,music_genres(name,slug)",
+      "id,title,artist,mood,duration_sec,public_url,storage_path,genre_id,music_genres(name,slug)",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
@@ -60,16 +61,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const tracks = (data || []).map((t) => ({
-    id: String(t.id),
-    name: String(t.title || "Track"),
-    artist: String(t.artist || ""),
-    mood: String(t.mood || ""),
-    previewUrl: (t.public_url || null) as string | null,
-    thumb: null as string | null,
-    durationSec:
-      typeof t.duration_sec === "number" ? t.duration_sec : null,
-  }));
+  const tracks = await Promise.all(
+    (data || []).map(async (t) => {
+      const playUrl = await playableObjectUrl(t.storage_path, t.public_url);
+      return {
+        id: String(t.id),
+        name: String(t.title || "Track"),
+        artist: String(t.artist || ""),
+        mood: String(t.mood || ""),
+        previewUrl: playUrl,
+        thumb: null as string | null,
+        durationSec:
+          typeof t.duration_sec === "number" ? t.duration_sec : null,
+      };
+    }),
+  );
 
   return NextResponse.json({
     ok: true,

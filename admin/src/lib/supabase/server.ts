@@ -53,7 +53,9 @@ export async function getAdminUser(): Promise<{
     } = await supabase.auth.getUser();
     if (!user) return null;
 
-    const { data: profile } = await supabase
+    // Service role — authoritative is_admin (avoids RLS/column edge cases)
+    const service = createServiceClient();
+    const { data: profile } = await service
       .from("profiles")
       .select("is_admin,email")
       .eq("id", user.id)
