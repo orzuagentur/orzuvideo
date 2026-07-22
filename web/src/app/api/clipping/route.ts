@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { PREVIEW_BUCKET } from "@/lib/storage";
+import { publicObjectUrl, r2Configured } from "@/lib/r2";
+import { MEDIA_BUCKET } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -39,7 +40,7 @@ type SourceIn = {
 
 /**
  * Queue an AI Clipping job.
- * Device files: client-uploaded to Storage.
+ * Device files: client-uploaded to Cloudflare R2 (presigned PUT).
  * Media: Pexels URLs from our Media search API.
  */
 export async function POST(request: Request) {
@@ -130,10 +131,10 @@ export async function POST(request: Request) {
       continue;
     }
 
-    // device
+    // device — file already in R2 via /api/storage/presign
     const storage_path = String(s.storage_path || "").trim() || null;
     const storage_bucket =
-      String(s.storage_bucket || PREVIEW_BUCKET).trim() || PREVIEW_BUCKET;
+      String(s.storage_bucket || MEDIA_BUCKET).trim() || MEDIA_BUCKET;
     let url = String(s.url || "").trim();
 
     if (storage_path && !storage_path.startsWith(`${user.id}/`)) {
@@ -146,10 +147,25 @@ export async function POST(request: Request) {
       );
     }
     if (!url && storage_path) {
-      const { data: pub } = supabase.storage
-        .from(storage_bucket)
-        .getPublicUrl(storage_path);
-      url = pub.publicUrl;
+      if (!r2Configured()) {
+        return NextResponse.json(
+          { error: "Cloudflare R2 is not configured" },
+          { status: 503 },
+        );
+      }
+      try {
+        url = publicObjectUrl(storage_path);
+      } catch (e) {
+        return NextResponse.json(
+          {
+            error:
+              e instanceof Error
+                ? e.message
+                : "Could not build R2 public URL",
+          },
+          { status: 500 },
+        );
+      }
     }
 
     sources.push({
@@ -199,7 +215,7 @@ export async function POST(request: Request) {
       title: titleHint || (sources.length > 1 ? "AI Mix Clip" : "AI Clip"),
       preview_url: first.kind === "device" ? first.url : null,
       storage_path: first.storage_path,
-      storage_bucket: first.storage_bucket || PREVIEW_BUCKET,
+      storage_bucket: first.storage_bucket || MEDIA_BUCKET,
       duration_seconds,
       metadata,
     })

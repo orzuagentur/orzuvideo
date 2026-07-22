@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { appUrl, youtubeRedirectUri } from "@/lib/app-url";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const err = url.searchParams.get("error");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const base = appUrl();
 
   if (err || !code) {
-    return NextResponse.redirect(`${appUrl}/dashboard?youtube=error`);
+    return NextResponse.redirect(`${base}/dashboard?youtube=error`);
   }
 
   const supabase = await createClient();
@@ -17,7 +18,7 @@ export async function GET(request: Request) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.redirect(`${appUrl}/login`);
+    return NextResponse.redirect(`${base}/login`);
   }
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
@@ -27,7 +28,7 @@ export async function GET(request: Request) {
       code,
       client_id: process.env.YOUTUBE_CLIENT_ID!,
       client_secret: process.env.YOUTUBE_CLIENT_SECRET!,
-      redirect_uri: process.env.YOUTUBE_REDIRECT_URI!,
+      redirect_uri: youtubeRedirectUri(),
       grant_type: "authorization_code",
     }),
   });
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
   const tokens = await tokenRes.json();
   if (!tokenRes.ok) {
     console.error("YouTube token error", tokens);
-    return NextResponse.redirect(`${appUrl}/dashboard?youtube=token_error`);
+    return NextResponse.redirect(`${base}/dashboard?youtube=token_error`);
   }
 
   const expiresAt = tokens.expires_in
@@ -60,7 +61,7 @@ export async function GET(request: Request) {
 
   if (error) {
     console.error(error);
-    return NextResponse.redirect(`${appUrl}/dashboard?youtube=save_error`);
+    return NextResponse.redirect(`${base}/dashboard?youtube=save_error`);
   }
 
   // Auto-add the channel linked to this Google login (mine=true).
@@ -132,11 +133,11 @@ export async function GET(request: Request) {
         })
         .eq("id", user.id);
 
-      return NextResponse.redirect(`${appUrl}/dashboard/channel`);
+      return NextResponse.redirect(`${base}/dashboard/channel`);
     }
   } catch (e) {
     console.error("YouTube channel auto-add failed", e);
   }
 
-  return NextResponse.redirect(`${appUrl}/dashboard?channels=1`);
+  return NextResponse.redirect(`${base}/dashboard?channels=1`);
 }

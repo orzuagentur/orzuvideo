@@ -520,18 +520,19 @@ def fetch_source_file(
     src: dict,
     dest: Path,
 ) -> Path:
-    """Prefer Storage download; fall back to HTTP URL."""
+    """Prefer Cloudflare R2 download; fall back to HTTP URL."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    bucket = str(src.get("storage_bucket") or "short-previews").strip()
     path = str(src.get("storage_path") or "").strip()
     if path:
         try:
-            data = sb.storage.from_(bucket).download(path)
-            dest.write_bytes(data)
-            if dest.stat().st_size > 1000:
-                return dest
+            from orzuvideo.services.storage import download_object, r2_configured
+
+            if r2_configured():
+                download_object(path, dest)
+                if dest.stat().st_size > 1000:
+                    return dest
         except Exception as exc:
-            print(f"[CLIPPING] storage download failed {bucket}/{path}: {exc}")
+            print(f"[CLIPPING] R2 download failed {path}: {exc}")
 
     url = str(src.get("url") or "").strip()
     if not url:

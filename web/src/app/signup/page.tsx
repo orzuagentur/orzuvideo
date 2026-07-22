@@ -78,6 +78,17 @@ export default function SignupPage() {
             {loading ? "Creating…" : "Sign up"}
           </button>
         </form>
+        <p className="mt-4 text-xs text-[color:var(--muted)]">
+          By signing up you agree to our{" "}
+          <Link href="/terms" className="text-[color:var(--accent)]">
+            Terms
+          </Link>{" "}
+          and{" "}
+          <Link href="/privacy" className="text-[color:var(--accent)]">
+            Privacy Policy
+          </Link>
+          .
+        </p>
         <p className="mt-5 text-sm text-[color:var(--muted)]">
           Already registered?{" "}
           <Link href="/login" className="text-[color:var(--accent)]">

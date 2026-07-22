@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/middleware";
-import { PREVIEW_BUCKET, previewObjectPath } from "@/lib/storage";
+import {
+  objectExists,
+  publicObjectUrl,
+  r2Configured,
+  signedGetUrl,
+} from "@/lib/r2";
+import { MEDIA_BUCKET, previewObjectPath } from "@/lib/storage";
 
 type Params = { params: Promise<{ id: string }> };
 
 /**
- * Authenticated playback/download for Creativity library videos.
- * Resolves file from Storage (storage_path) with signed URL, then public preview_url.
+ * Authenticated playback/download for library videos in Cloudflare R2.
  */
 export async function GET(request: Request, { params }: Params) {
   const { id } = await params;
@@ -37,26 +41,39 @@ export async function GET(request: Request, { params }: Params) {
     storage_path?: string;
     storage_bucket?: string;
   };
-  const bucket =
-    job.storage_bucket || meta.storage_bucket || PREVIEW_BUCKET;
   const key =
     job.storage_path ||
     meta.storage_path ||
     previewObjectPath(user.id, id);
 
-  const admin = createServiceClient();
-  const { data: signed, error: signErr } = await admin.storage
-    .from(bucket)
-    .createSignedUrl(key, 60 * 60);
+  let target: string | null = null;
 
-  const target = signed?.signedUrl || job.preview_url || null;
+  if (r2Configured() && key) {
+    try {
+      // Prefer short-lived signed URL (works even if bucket is private)
+      target = await signedGetUrl(key, 60 * 60);
+    } catch (e) {
+      console.error("[preview] R2 signed URL failed:", e);
+      try {
+        if (await objectExists(key)) {
+          target = publicObjectUrl(key);
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+  }
+
+  if (!target) {
+    target = job.preview_url || null;
+  }
+
   if (!target) {
     return NextResponse.json(
       {
         error:
-          signErr?.message ||
-          "Video file is not in Supabase Storage yet. Re-generate the video (worker must upload successfully).",
-        bucket,
+          "Video file is not in Cloudflare R2 yet. Re-generate the video after R2 is configured.",
+        bucket: job.storage_bucket || MEDIA_BUCKET,
         path: key,
         status: job.status,
       },

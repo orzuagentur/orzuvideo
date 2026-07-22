@@ -15,9 +15,21 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_APP_URL || "https://orzuai.com",
+  ),
   title: "OrzuAi — AI YouTube Shorts",
   description:
     "Train once. OrzuAi creates and publishes two Shorts every day.",
+  applicationName: "OrzuAi",
+  openGraph: {
+    title: "OrzuAi",
+    description:
+      "Train once. OrzuAi creates and publishes two Shorts every day.",
+    url: "https://orzuai.com",
+    siteName: "OrzuAi",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

@@ -18,7 +18,7 @@ import {
   statusColor,
 } from "@/lib/job-status";
 import { useToast } from "@/components/ToastNotice";
-import { PREVIEW_BUCKET } from "@/lib/storage";
+import { clippingSourcePath, MEDIA_BUCKET } from "@/lib/storage";
 import { VoicePicker } from "@/components/VoicePicker";
 
 const ASPECTS = [
@@ -696,23 +696,35 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
       for (let i = 0; i < sources.length; i++) {
         const s = sources[i];
         if (s.kind === "device" && s.file) {
-          const path = `${user.id}/clipping/${jobId}/source_${i}.mp4`;
-          const { error: upErr } = await supabase.storage
-            .from(PREVIEW_BUCKET)
-            .upload(path, s.file, {
-              contentType: s.file.type || "video/mp4",
-              upsert: true,
-            });
-          if (upErr) throw new Error(upErr.message || "Upload failed");
-          const { data: pub } = supabase.storage
-            .from(PREVIEW_BUCKET)
-            .getPublicUrl(path);
+          const path = clippingSourcePath(user.id, jobId, i);
+          const contentType = s.file.type || "video/mp4";
+          const presignRes = await fetch("/api/storage/presign", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              key: path,
+              contentType,
+              contentLength: s.file.size,
+            }),
+          });
+          const presign = await presignRes.json().catch(() => ({}));
+          if (!presignRes.ok) {
+            throw new Error(presign.error || "R2 presign failed");
+          }
+          const putRes = await fetch(presign.uploadUrl as string, {
+            method: "PUT",
+            body: s.file,
+            headers: { "Content-Type": contentType },
+          });
+          if (!putRes.ok) {
+            throw new Error(`R2 upload failed (${putRes.status})`);
+          }
           payloadSources.push({
             kind: "device",
             title: s.title,
             storage_path: path,
-            storage_bucket: PREVIEW_BUCKET,
-            url: pub.publicUrl,
+            storage_bucket: (presign.bucket as string) || MEDIA_BUCKET,
+            url: presign.publicUrl as string,
           });
         } else if (s.kind === "media") {
           payloadSources.push({

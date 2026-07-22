@@ -26,6 +26,9 @@ type MediaCard = {
   height: number | null;
   pageUrl: string | null;
   downloadAllowed: boolean;
+  genre?: string | null;
+  mood?: string | null;
+  genreId?: string | null;
 };
 
 const TYPE_OPTIONS: { id: MediaKind; label: string }[] = [
@@ -186,7 +189,7 @@ async function downloadToDevice(item: MediaCard) {
       ? `pexels-${item.id}.mp4`
       : item.kind === "photo"
         ? `pexels-${item.id}.jpg`
-        : `jamendo-${item.id}.mp3`;
+        : `library-${item.id}.mp3`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -195,7 +198,7 @@ async function downloadToDevice(item: MediaCard) {
 
 function defaultQueryFor(kind: MediaKind) {
   if (kind === "all") return "";
-  if (kind === "music") return "soundtrack";
+  if (kind === "music") return "";
   if (kind === "photo") return "nature";
   return "cinematic";
 }
@@ -205,6 +208,10 @@ export function MediaStudio() {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [orientation, setOrientation] = useState("all");
+  const [genreId, setGenreId] = useState("");
+  const [genres, setGenres] = useState<Array<{ id: string; name: string }>>(
+    [],
+  );
   const [typeOpen, setTypeOpen] = useState(false);
   const [formatOpen, setFormatOpen] = useState(false);
   const [listPage, setListPage] = useState(1);
@@ -227,7 +234,8 @@ export function MediaStudio() {
   const requestIdRef = useRef(0);
 
   const showFormatFilter = kind === "video" || kind === "photo";
-  const searchKey = `${kind}|${submitted}|${orientation}|${listPage}|${listSeed}`;
+  const showGenreFilter = kind === "music";
+  const searchKey = `${kind}|${submitted}|${orientation}|${genreId}|${listPage}|${listSeed}`;
   const colCount = useMasonryColumnCount();
   const columns = useStickyMasonry(items, colCount, searchKey);
 
@@ -249,6 +257,7 @@ export function MediaStudio() {
           orientation: showFormatFilter ? orientation : "all",
           seed: listSeed,
         });
+        if (genreId) params.set("genre_id", genreId);
         const res = await fetch(`/api/media/search?${params}`, {
           cache: "no-store",
         });
@@ -280,7 +289,25 @@ export function MediaStudio() {
     return () => {
       cancelled = true;
     };
-  }, [searchKey, kind, submitted, orientation, showFormatFilter, listPage, listSeed]);
+  }, [searchKey, kind, submitted, orientation, showFormatFilter, listPage, listSeed, genreId]);
+
+  useEffect(() => {
+    if (kind !== "music") return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/music/genres");
+      const data = await res.json().catch(() => ({}));
+      if (cancelled || !res.ok) return;
+      setGenres(
+        ((data.items || []) as Array<{ id: string; name: string }>).map(
+          (g) => ({ id: g.id, name: g.name }),
+        ),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kind]);
 
   const loadMore = useCallback(async () => {
     if (loadingRef.current || !hasMoreRef.current) return;
@@ -294,6 +321,7 @@ export function MediaStudio() {
         page: String(nextPage),
         orientation: kind === "video" || kind === "photo" ? orientation : "all",
       });
+      if (genreId) params.set("genre_id", genreId);
       const res = await fetch(`/api/media/search?${params}`, {
         cache: "no-store",
       });
@@ -319,7 +347,7 @@ export function MediaStudio() {
         loadingRef.current = false;
       }
     }
-  }, [kind, submitted, orientation]);
+  }, [kind, submitted, orientation, genreId]);
 
   useEffect(() => {
     const el = sentinelRef.current;
@@ -469,6 +497,7 @@ export function MediaStudio() {
     if (next === kind) return;
     setKind(next);
     setOrientation("all");
+    setGenreId("");
     setListPage(1);
     setListSeed(String(Date.now()));
     setPlayingId(null);
@@ -625,7 +654,11 @@ export function MediaStudio() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search video, photos, music…"
+            placeholder={
+              kind === "music"
+                ? "Search by title…"
+                : "Search video, photos, music…"
+            }
             className={`w-full rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] py-2.5 pr-11 text-sm outline-none focus:border-[color:rgba(232,165,75,0.55)] ${
               showFormatFilter ? "pl-11" : "pl-3"
             }`}
@@ -706,6 +739,25 @@ export function MediaStudio() {
           )}
         </div>
 
+        {showGenreFilter && (
+          <select
+            value={genreId}
+            onChange={(e) => {
+              setGenreId(e.target.value);
+              setListPage(1);
+              setListSeed(String(Date.now()));
+            }}
+            className="h-[42px] shrink-0 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] px-3 text-sm"
+          >
+            <option value="">All genres</option>
+            {genres.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        )}
+
         <button
           type="button"
           title="Refresh"
@@ -737,8 +789,77 @@ export function MediaStudio() {
         <p className="text-sm text-[color:var(--muted)]">Loading…</p>
       ) : items.length === 0 ? (
         <p className="rounded-xl border border-dashed border-[color:var(--line)] p-8 text-center text-sm text-[color:var(--muted)]">
-          No results. Try another search.
+          {kind === "music" ? (
+            <>
+              No tracks yet. Upload music in{" "}
+              <a
+                href="/dashboard/music"
+                className="text-[color:var(--accent)] underline"
+              >
+                Music library
+              </a>
+              .
+            </>
+          ) : (
+            "No results. Try another search."
+          )}
         </p>
+      ) : kind === "music" ? (
+        <div className="overflow-hidden rounded-2xl border border-[color:var(--line)]">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="bg-[color:var(--bg-elevated)] text-[11px] uppercase tracking-wide text-[color:var(--muted)]">
+                <tr>
+                  <th className="px-3 py-2.5 font-medium">Play</th>
+                  <th className="px-3 py-2.5 font-medium">Title</th>
+                  <th className="px-3 py-2.5 font-medium">Genre</th>
+                  <th className="px-3 py-2.5 font-medium">Duration</th>
+                  <th className="px-3 py-2.5 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item) => {
+                  const key = itemKey(item);
+                  const playing = playingId === key;
+                  return (
+                    <tr
+                      key={key}
+                      className="border-t border-[color:var(--line)] hover:bg-white/[0.03]"
+                    >
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          disabled={!item.previewUrl}
+                          onClick={() => togglePlay(item)}
+                          className="rounded-lg border border-[color:var(--line)] px-2 py-1 text-xs disabled:opacity-40"
+                        >
+                          {playing ? "Pause" : "Play"}
+                        </button>
+                      </td>
+                      <td className="px-3 py-2 font-medium">{item.title}</td>
+                      <td className="px-3 py-2 text-[color:var(--muted)]">
+                        {item.genre || "—"}
+                      </td>
+                      <td className="px-3 py-2 tabular-nums text-[color:var(--muted)]">
+                        {formatDuration(item.durationSec) || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          disabled={!item.downloadAllowed || busyId === key}
+                          onClick={() => void onDownload(item)}
+                          className="text-xs text-[color:var(--muted)] hover:text-[color:var(--accent)] disabled:opacity-40"
+                        >
+                          {busyId === key ? "…" : "Download"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
         <div className="flex items-start gap-3">
           {columns.map((col, colIdx) => (

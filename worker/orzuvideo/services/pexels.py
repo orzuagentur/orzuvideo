@@ -8,7 +8,7 @@ import httpx
 from orzuvideo.config import settings
 
 
-def search_videos(query: str, per_page: int = 12) -> list[dict]:
+def search_videos(query: str, per_page: int = 12, page: int = 1) -> list[dict]:
     if not settings.pexels_api_key:
         raise RuntimeError("PEXELS_API_KEY is required")
 
@@ -18,6 +18,7 @@ def search_videos(query: str, per_page: int = 12) -> list[dict]:
         "orientation": "portrait",
         "size": "medium",
         "per_page": per_page,
+        "page": page,
     }
     with httpx.Client(timeout=60.0) as client:
         resp = client.get(
@@ -80,30 +81,35 @@ def download_stock_clips(
     for query in search_list:
         if len(clips) >= count:
             break
-        try:
-            videos = search_videos(query, per_page=15)
-        except Exception as exc:
-            print(f"Pexels search failed ({query}): {exc}")
-            continue
-        random.shuffle(videos)
-        for video in videos:
-            vid = str(video.get("id") or "")
-            if not vid or vid in seen_ids:
-                continue
-            link = _best_file(video)
-            if not link:
-                continue
-            seen_ids.add(vid)
-            path = dest_dir / f"pexels_{vid}.mp4"
-            with httpx.Client(timeout=120.0, follow_redirects=True) as client:
-                r = client.get(link)
-                r.raise_for_status()
-                path.write_bytes(r.content)
-            clips.append(path)
-            used_ids.append(vid)
-            print(f"Pexels clip {vid} for query={query!r}")
+        for page in (1, 2, 3):
             if len(clips) >= count:
                 break
+            try:
+                videos = search_videos(query, per_page=30, page=page)
+            except Exception as exc:
+                print(f"Pexels search failed ({query} p{page}): {exc}")
+                continue
+            if not videos:
+                break
+            random.shuffle(videos)
+            for video in videos:
+                vid = str(video.get("id") or "")
+                if not vid or vid in seen_ids:
+                    continue
+                link = _best_file(video)
+                if not link:
+                    continue
+                seen_ids.add(vid)
+                path = dest_dir / f"pexels_{vid}.mp4"
+                with httpx.Client(timeout=120.0, follow_redirects=True) as client:
+                    r = client.get(link)
+                    r.raise_for_status()
+                    path.write_bytes(r.content)
+                clips.append(path)
+                used_ids.append(vid)
+                print(f"Pexels clip {vid} for query={query!r} page={page}")
+                if len(clips) >= count:
+                    break
 
     if not clips:
         raise RuntimeError(f"No fresh Pexels clips for queries: {queries}")

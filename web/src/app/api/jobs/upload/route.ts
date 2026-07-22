@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/middleware";
 import { getActiveYoutubeChannel } from "@/lib/youtube-channels";
-import { PREVIEW_BUCKET, previewObjectPath } from "@/lib/storage";
+import { r2Configured, uploadObject } from "@/lib/r2";
+import { MEDIA_BUCKET, previewObjectPath } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
 /**
- * Upload a local MP4 from the device and queue YouTube publish
- * (worker uses publish_existing + preview_url).
+ * Upload a local MP4 from the device and queue YouTube publish.
+ * File goes to Cloudflare R2; job row stays in Supabase.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -17,6 +17,13 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!r2Configured()) {
+    return NextResponse.json(
+      { error: "Cloudflare R2 is not configured" },
+      { status: 503 },
+    );
   }
 
   const active = await getActiveYoutubeChannel(user.id);
@@ -53,18 +60,22 @@ export async function POST(request: Request) {
   const jobId = crypto.randomUUID();
   const key = previewObjectPath(user.id, jobId);
   const bytes = Buffer.from(await file.arrayBuffer());
-  const admin = createServiceClient();
 
-  const { error: upErr } = await admin.storage.from(PREVIEW_BUCKET).upload(key, bytes, {
-    contentType: file.type || "video/mp4",
-    upsert: true,
-  });
-  if (upErr) {
-    return NextResponse.json({ error: upErr.message }, { status: 500 });
+  let uploaded;
+  try {
+    uploaded = await uploadObject({
+      key,
+      body: bytes,
+      contentType: file.type || "video/mp4",
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : "R2 upload failed" },
+      { status: 500 },
+    );
   }
 
-  const { data: pub } = admin.storage.from(PREVIEW_BUCKET).getPublicUrl(key);
-  const preview_url = pub.publicUrl;
+  const preview_url = uploaded.publicUrl;
 
   const metadata = {
     publish: true,
@@ -87,7 +98,7 @@ export async function POST(request: Request) {
       title,
       preview_url,
       storage_path: key,
-      storage_bucket: PREVIEW_BUCKET,
+      storage_bucket: uploaded.bucket || MEDIA_BUCKET,
       metadata,
     })
     .select("id")

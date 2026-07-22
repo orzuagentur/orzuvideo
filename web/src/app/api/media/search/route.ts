@@ -16,6 +16,10 @@ type MediaCard = {
   height: number | null;
   pageUrl: string | null;
   downloadAllowed: boolean;
+  /** Own library extras */
+  genre?: string | null;
+  mood?: string | null;
+  genreId?: string | null;
 };
 
 function bestVideoFile(files: { link?: string; width?: number; height?: number; quality?: string }[]) {
@@ -158,95 +162,64 @@ async function searchPexelsPhotos(
   return { items, total: Number(data.total_results || items.length) };
 }
 
-async function searchJamendo(
-  clientId: string,
+async function searchLibraryMusic(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
   q: string,
   page: number,
+  genreId: string,
 ): Promise<{ items: MediaCard[]; total: number }> {
-  const offset = String((page - 1) * PAGE_SIZE);
-  const base = {
-    client_id: clientId,
-    format: "json",
-    limit: String(PAGE_SIZE),
-    offset,
-    audioformat: "mp32",
-    audiodlformat: "mp32",
-    include: "musicinfo",
-    order: "popularity_total",
-  };
+  const pageSize = PAGE_SIZE;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
 
+  let query = supabase
+    .from("music_tracks")
+    .select(
+      "id,title,artist,mood,duration_sec,public_url,genre_id,music_genres(name)",
+      { count: "exact" },
+    )
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+
+  if (genreId) query = query.eq("genre_id", genreId);
   const cleaned = q.trim();
-  // Jamendo `search=` often returns 0 for short mood words like "epic".
-  // Try several strategies until we get tracks.
-  const strategies: Record<string, string>[] = cleaned
-    ? [
-        { search: cleaned },
-        { fuzzytags: cleaned, vocalinstrumental: "instrumental" },
-        { tags: cleaned.replace(/\s+/g, "+"), vocalinstrumental: "instrumental" },
-        { tags: "soundtrack", vocalinstrumental: "instrumental" },
-      ]
-    : [
-        { tags: "soundtrack", vocalinstrumental: "instrumental" },
-        { order: "popularity_total", vocalinstrumental: "instrumental" },
-      ];
-
-  let results: unknown[] = [];
-  let fullcount = 0;
-
-  for (const strategy of strategies) {
-    const params = new URLSearchParams({ ...base, ...strategy });
-    // Prefer strategy order over base when strategy sets order
-    const res = await fetch(
-      `https://api.jamendo.com/v3.0/tracks/?${params}`,
-      { cache: "no-store" },
+  if (cleaned) {
+    query = query.or(
+      `title.ilike.%${cleaned}%,artist.ilike.%${cleaned}%,mood.ilike.%${cleaned}%`,
     );
-    const data = await res.json();
-    const headers = data.headers || {};
-    if (String(headers.code ?? "0") !== "0") {
-      continue;
-    }
-    const batch = data.results || [];
-    if (batch.length > 0) {
-      results = batch;
-      fullcount = Number(headers.results_fullcount || batch.length);
-      break;
-    }
   }
 
-  const items: MediaCard[] = (results as {
-    id: string | number;
-    name?: string;
-    artist_name?: string;
-    image?: string;
-    audio?: string;
-    audiodownload?: string;
-    audiodownload_allowed?: boolean;
-    duration?: number;
-    shareurl?: string;
-  }[]).map((t) => {
-    const downloadUrl = t.audiodownload || t.audio || null;
+  const { data, error, count } = await query;
+  if (error) throw new Error(error.message);
+
+  const items: MediaCard[] = (data || []).map((t) => {
+    const g = t.music_genres as
+      | { name?: string }
+      | { name?: string }[]
+      | null;
+    const genreName = Array.isArray(g) ? g[0]?.name : g?.name;
     return {
       id: String(t.id),
       kind: "music" as const,
-      title: t.name || `Track #${t.id}`,
-      author: t.artist_name || "Jamendo",
-      thumb: t.image || null,
-      previewUrl: t.audio || t.audiodownload || null,
-      downloadUrl,
-      durationSec: t.duration ?? null,
+      title: t.title || "Track",
+      author: t.artist || "—",
+      thumb: null,
+      previewUrl: t.public_url || null,
+      downloadUrl: t.public_url || null,
+      durationSec: t.duration_sec ?? null,
       width: null,
       height: null,
-      pageUrl: t.shareurl || null,
-      downloadAllowed: Boolean(
-        t.audiodownload_allowed !== false && downloadUrl,
-      ),
+      pageUrl: null,
+      downloadAllowed: Boolean(t.public_url),
+      genre: genreName || null,
+      mood: t.mood || null,
+      genreId: t.genre_id || null,
     };
   });
 
-  return {
-    items,
-    total: fullcount || items.length,
-  };
+  return { items, total: count ?? items.length };
 }
 
 function seededShuffle<T>(arr: T[], seed: string): T[] {
@@ -264,7 +237,7 @@ function seededShuffle<T>(arr: T[], seed: string): T[] {
   return out;
 }
 
-/** Search stock media via Pexels / Jamendo. Does not touch our DB. */
+/** Search Pexels (video/photo) + own R2 music library. */
 export async function GET(request: Request) {
   const supabase = await createClient();
   const {
@@ -277,15 +250,13 @@ export async function GET(request: Request) {
   const q = url.searchParams.get("q") || "";
   const page = Math.max(1, Number(url.searchParams.get("page") || 1));
   const orientation = url.searchParams.get("orientation") || "all";
+  const genreId = (url.searchParams.get("genre_id") || "").trim();
 
   try {
     if (kind === "all") {
       const pexelsKey = process.env.PEXELS_API_KEY;
-      const jamendoId = process.env.JAMENDO_CLIENT_ID;
       const take = 12;
       const empty = { items: [] as MediaCard[], total: 0 };
-      // High page numbers often return empty from Pexels while Jamendo still
-      // has tracks — clamp and fall back so refresh stays mixed.
       const safePage = Math.min(Math.max(1, page), 12);
 
       async function withPageFallback(
@@ -307,7 +278,6 @@ export async function GET(request: Request) {
 
       const videoQ = q.trim() || "cinematic";
       const photoQ = q.trim() || "nature";
-      const musicQ = q.trim() || "soundtrack";
 
       const [videos, photos, tracks] = await Promise.all([
         pexelsKey
@@ -320,9 +290,9 @@ export async function GET(request: Request) {
               searchPexelsPhotos(pexelsKey, photoQ, p, orientation),
             )
           : Promise.resolve(empty),
-        jamendoId
-          ? withPageFallback((p) => searchJamendo(jamendoId, musicQ, p))
-          : Promise.resolve(empty),
+        withPageFallback((p) =>
+          searchLibraryMusic(supabase, user.id, q, p, genreId),
+        ),
       ]);
 
       const mixed = seededShuffle(
@@ -380,21 +350,20 @@ export async function GET(request: Request) {
     }
 
     if (kind === "music") {
-      const clientId = process.env.JAMENDO_CLIENT_ID;
-      if (!clientId) {
-        return NextResponse.json(
-          { error: "JAMENDO_CLIENT_ID is not configured" },
-          { status: 500 },
-        );
-      }
-      const result = await searchJamendo(clientId, q, page);
+      const result = await searchLibraryMusic(
+        supabase,
+        user.id,
+        q,
+        page,
+        genreId,
+      );
       return NextResponse.json({
         items: result.items,
         total: result.total,
         page,
         pageSize: PAGE_SIZE,
         hasMore: result.items.length >= PAGE_SIZE,
-        provider: "jamendo",
+        provider: "library",
       });
     }
 

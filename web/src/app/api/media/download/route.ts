@@ -9,11 +9,12 @@ const ALLOWED_HOSTS = [
   "vimeo.com",
   "i.vimeocdn.com",
   "vod-progressive.akamaized.net",
-  "mp3d.jamendo.com",
-  "mp3l.jamendo.com",
-  "storage.jamendo.com",
-  "imgjam.com",
-  "api.jamendo.com",
+  "media.orzuai.com",
+  "r2.dev",
+  "cloudflarestorage.com",
+  "cdn.polyhaven.com",
+  "dl.polyhaven.org",
+  "polyhaven.com",
 ];
 
 function isAllowedUrl(raw: string): boolean {

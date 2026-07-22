@@ -3,12 +3,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from supabase import Client
-
 from orzuvideo.services.storage import (
-    PREVIEW_BUCKET,
     StoredObject,
-    ensure_bucket,
+    media_bucket,
+    thumb_object_path,
     upload_public_file,
 )
 
@@ -16,7 +14,6 @@ from orzuvideo.services.storage import (
 def extract_thumbnail(video_path: Path, out_path: Path, *, at_sec: float = 1.2) -> Path:
     """Grab a still frame from the finished Short for cover / YouTube thumb."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # Prefer a moment after the hook punch (~1.2s); fallback to 0.3s
     for t in (max(0.3, at_sec), 0.5, 0.1):
         cmd = [
             "ffmpeg",
@@ -40,29 +37,17 @@ def extract_thumbnail(video_path: Path, out_path: Path, *, at_sec: float = 1.2) 
 
 
 def upload_thumbnail(
-    sb: Client,
+    sb=None,
     *,
     user_id: str,
     job_id: str,
     image_path: Path,
 ) -> StoredObject:
-    ensure_bucket(
-        sb,
-        PREVIEW_BUCKET,
-        public=True,
-        mime_types=[
-            "video/mp4",
-            "video/quicktime",
-            "video/webm",
-            "image/jpeg",
-            "image/png",
-            "image/webp",
-        ],
-    )
-    key = f"{user_id}/{job_id}_thumb.jpg"
+    """Upload cover JPEG to Cloudflare R2."""
+    _ = sb
+    key = thumb_object_path(user_id, job_id)
     return upload_public_file(
-        sb,
-        bucket=PREVIEW_BUCKET,
+        bucket=media_bucket(),
         key=key,
         path=image_path,
         content_type="image/jpeg",

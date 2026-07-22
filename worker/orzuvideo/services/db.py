@@ -163,7 +163,8 @@ def used_media_ids(
     provider: str,
     *,
     days: int = 60,
-    limit: int = 400,
+    limit: int = 3000,
+    all_time: bool = False,
 ) -> set[str]:
     try:
         result = (
@@ -178,12 +179,16 @@ def used_media_ids(
     except Exception as exc:
         print(f"media_usage read skipped: {exc}")
         return set()
-    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
     out: set[str] = set()
+    if all_time or days >= 3650:
+        for row in result.data or []:
+            if row.get("asset_id"):
+                out.add(str(row["asset_id"]))
+        return out
+    cutoff = datetime.now(timezone.utc).timestamp() - days * 86400
     for row in result.data or []:
         try:
             created = row.get("created_at") or ""
-            # ISO parse roughly
             ts = datetime.fromisoformat(str(created).replace("Z", "+00:00")).timestamp()
             if ts >= cutoff:
                 out.add(str(row["asset_id"]))

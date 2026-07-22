@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { appUrl, youtubeRedirectUri } from "@/lib/app-url";
 
 export async function GET() {
   const supabase = await createClient();
@@ -7,13 +8,13 @@ export async function GET() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+  const base = appUrl();
   if (!user) {
-    return NextResponse.redirect(`${appUrl}/login`);
+    return NextResponse.redirect(`${base}/login`);
   }
 
   const clientId = process.env.YOUTUBE_CLIENT_ID;
-  const redirectUri = process.env.YOUTUBE_REDIRECT_URI;
+  const redirectUri = youtubeRedirectUri();
 
   if (!clientId || !redirectUri) {
     return NextResponse.json(

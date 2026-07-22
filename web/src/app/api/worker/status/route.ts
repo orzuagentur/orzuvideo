@@ -186,11 +186,17 @@ export async function GET() {
         note: "Also required in worker/.env",
       },
       {
-        id: "jamendo",
-        label: "Jamendo",
-        ok: configured("JAMENDO_CLIENT_ID"),
-        scope: "worker",
-        note: "Also required in worker/.env",
+        id: "library",
+        label: "Music library (R2)",
+        ok: configured(
+          "R2_ACCOUNT_ID",
+          "R2_ACCESS_KEY_ID",
+          "R2_SECRET_ACCESS_KEY",
+          "R2_BUCKET",
+          "R2_PUBLIC_BASE_URL",
+        ),
+        scope: "both",
+        note: "Own tracks in Cloudflare R2 — upload via Music page",
       },
       {
         id: "ffmpeg",

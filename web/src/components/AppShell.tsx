@@ -13,6 +13,10 @@ import {
 } from "react";
 import { ChannelsMenu } from "@/components/ChannelsMenu";
 import { ClippingProgressDock } from "@/components/ClippingProgressDock";
+import {
+  MusicUploadProvider,
+} from "@/components/MusicUploadProvider";
+import { MusicUploadDock } from "@/components/MusicUploadDock";
 
 type NavItem = {
   href: string;
@@ -22,6 +26,8 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Media", exact: true },
+  { href: "/dashboard/creators", label: "For creators" },
+  { href: "/dashboard/music", label: "Music" },
   { href: "/dashboard/clipping", label: "AI Clipping" },
   { href: "/dashboard/content", label: "Creativity" },
   { href: "/dashboard/favorites", label: "Favorites" },
@@ -223,6 +229,8 @@ export function AppShell({
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const isMedia = pathname === "/dashboard";
+  const isCreators = pathname.startsWith("/dashboard/creators");
+  // Media + For creators own the toolbar row (YouTube + search)
   const isEditor = pathname.startsWith("/dashboard/editor");
   const ctx = { menuOpen, setMenuOpen };
 
@@ -236,68 +244,71 @@ export function AppShell({
 
   return (
     <ChannelsContext.Provider value={ctx}>
-      <div className="flex min-h-screen w-full flex-col bg-[color:var(--bg)]">
-        <Suspense fallback={null}>
-          <ChannelsQueryOpener />
-        </Suspense>
+      <MusicUploadProvider>
+        <div className="flex min-h-screen w-full flex-col bg-[color:var(--bg)]">
+          <Suspense fallback={null}>
+            <ChannelsQueryOpener />
+          </Suspense>
 
-        {/* No divider strip under the top bar */}
-        <header className="sticky top-0 z-50 bg-[color:var(--bg)]/95 backdrop-blur-md">
-          {/* Tall band so section links sit midway between top of screen and search */}
-          <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
-            <Link
-              href="/dashboard"
-              className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.9rem] tracking-[0.03em] md:text-[2.15rem] md:tracking-[0.04em]"
-              style={{ fontWeight: 800, transform: "scaleY(1.12)" }}
-            >
-              OrzuAi
-            </Link>
+          {/* No divider strip under the top bar */}
+          <header className="sticky top-0 z-50 bg-[color:var(--bg)]/95 backdrop-blur-md">
+            {/* Tall band so section links sit midway between top of screen and search */}
+            <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
+              <Link
+                href="/dashboard"
+                className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.9rem] tracking-[0.03em] md:text-[2.15rem] md:tracking-[0.04em]"
+                style={{ fontWeight: 800, transform: "scaleY(1.12)" }}
+              >
+                OrzuAi
+              </Link>
 
-            {/* Slightly below vertical center, toward the search row */}
-            <nav className="pointer-events-none absolute inset-0 flex items-center justify-center pt-3 md:pt-4">
-              <div className="pointer-events-auto flex max-w-[min(100%,54rem)] items-center gap-1 overflow-x-auto px-2 sm:gap-1.5 md:gap-2">
-                {NAV.map((item) => {
-                  const active = item.exact
-                    ? pathname === item.href
-                    : pathname === item.href ||
-                      pathname.startsWith(`${item.href}/`);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className="shrink-0 rounded-xl px-4 py-2.5 text-[1.05rem] font-semibold transition md:px-5 md:py-3 md:text-lg"
-                      style={{
-                        color: active ? "var(--fg)" : "var(--muted)",
-                        background: active
-                          ? "rgba(255,255,255,0.07)"
-                          : "transparent",
-                      }}
-                    >
-                      {item.label}
-                    </Link>
-                  );
-                })}
+              {/* Slightly below vertical center, toward the search row */}
+              <nav className="pointer-events-none absolute inset-0 flex items-center justify-center pt-3 md:pt-4">
+                <div className="pointer-events-auto flex max-w-[min(100%,54rem)] items-center gap-1 overflow-x-auto px-2 sm:gap-1.5 md:gap-2">
+                  {NAV.map((item) => {
+                    const active = item.exact
+                      ? pathname === item.href
+                      : pathname === item.href ||
+                        pathname.startsWith(`${item.href}/`);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className="shrink-0 rounded-xl px-4 py-2.5 text-[1.05rem] font-semibold transition md:px-5 md:py-3 md:text-lg"
+                        style={{
+                          color: active ? "var(--fg)" : "var(--muted)",
+                          background: active
+                            ? "rgba(255,255,255,0.07)"
+                            : "transparent",
+                        }}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </nav>
+
+              <div className="relative z-10 shrink-0">
+                <AccountMenu email={email} />
               </div>
-            </nav>
-
-            <div className="relative z-10 shrink-0">
-              <AccountMenu email={email} />
             </div>
-          </div>
 
-          {/* Non-Media: YouTube Channels under nav (Media owns its toolbar) */}
-          {!isMedia && (
-            <div className="flex items-center gap-3 px-4 pb-3 md:px-6">
-              <YouTubeChannelsButton />
-            </div>
-          )}
-        </header>
+            {/* Media / For creators: YouTube lives in their sticky toolbar next to search */}
+            {!isMedia && !isCreators && (
+              <div className="flex items-center gap-3 px-4 pb-3 md:px-6">
+                <YouTubeChannelsButton />
+              </div>
+            )}
+          </header>
 
-        <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
-          {children}
-        </main>
-        <ClippingProgressDock />
-      </div>
+          <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">
+            {children}
+          </main>
+          <MusicUploadDock />
+          <ClippingProgressDock />
+        </div>
+      </MusicUploadProvider>
     </ChannelsContext.Provider>
   );
 }

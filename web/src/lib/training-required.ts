@@ -29,7 +29,9 @@ export function musicTrainingDone(
   form: Pick<AiTraining, "music_prefs" | "music_group">,
 ): boolean {
   const selected = form.music_prefs?.selected_track_ids?.length ?? 0;
-  return selected > 0;
+  if (selected > 0) return true;
+  // Genre from own library is enough — worker matches by genre + mood
+  return Boolean(String(form.music_group || "").trim());
 }
 
 export function trainingFieldFilled(

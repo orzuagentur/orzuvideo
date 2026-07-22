@@ -33,15 +33,16 @@ Flow:
 3. Authentication → Providers → Email: enable
 4. Copy URL, anon key, and service_role key
 
-Finished videos live in Supabase Storage:
+Finished videos live in **Cloudflare R2** (not Supabase Storage). See [`STORAGE.md`](STORAGE.md).
+Domain / Google / Vercel checklist: [`DOMAIN.md`](DOMAIN.md) (`https://orzuai.com`).
 
 | What | Where |
 |------|--------|
-| MP4 file | bucket `short-previews` → `{user_id}/{job_id}.mp4` |
+| MP4 file | R2 bucket → `{user_id}/{job_id}.mp4` |
 | Link | `video_jobs.preview_url` + `storage_path` |
-| View | `/api/jobs/[id]/preview` (signed URL) |
+| View | `/api/jobs/[id]/preview` (signed R2 URL) |
 
-The worker does **not** mark status `ready` until Storage upload succeeds.
+Supabase keeps **auth + Postgres only**. The worker does **not** mark status `ready` until R2 upload succeeds.
 
 ## 2. API keys
 

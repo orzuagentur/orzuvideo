@@ -13,10 +13,22 @@ from orzuvideo.pipeline import reedit as reedit_pipe
 from orzuvideo.pipeline.editor import build_short, mix_audio
 from orzuvideo.pipeline.media import ffprobe_duration, synthesize_with_timestamps
 from orzuvideo.services import db
-from orzuvideo.services.jamendo import attribution_line, download_background_music
+from orzuvideo.services.media_pick import (
+    exclude_used_media,
+    fetch_background_music,
+    merge_optional_training,
+)
 from orzuvideo.services.pexels import download_stock_clips
 from orzuvideo.services.scriptgen import generate_creativity_script, generate_script
-from orzuvideo.services.storage import storage_meta, upload_preview
+from orzuvideo.services.storage import (
+    delete_object,
+    delete_prefix,
+    download_object,
+    media_bucket,
+    r2_configured,
+    storage_meta,
+    upload_preview,
+)
 from orzuvideo.services.youtube import upload_short
 
 
@@ -256,19 +268,27 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
     if add_music:
         db.update_job(sb, job_id, status="fetching_media")
         try:
-            mood = music_group or "energetic upbeat"
+            training = merge_optional_training(
+                sb,
+                user_id,
+                {"music_group": music_group},
+            )
+            mood = "energetic upbeat"
             if instructions and not music_group:
                 mood = f"energetic {instructions[:40]}"
-            preferred = [music_track_id] if music_track_id else None
-            track = download_background_music(
-                mood,
+            track, music_attr = fetch_background_music(
+                sb,
+                user_id,
+                job_id,
                 work / "music",
-                exclude_ids=set(),
-                preferred_ids=preferred,
+                training,
+                music_group=music_group,
+                music_track_id=music_track_id,
+                script_mood=mood,
+                default_mood=mood,
             )
             if track and track.path:
                 music_path = track.path
-                music_attr = attribution_line(track)
         except Exception as exc:
             print(f"[CLIPPING] music skipped: {exc}")
 
@@ -419,28 +439,27 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         metadata=meta_done,
     )
 
-    # Remove long device source files — keep only the AI clip in Storage/DB job row
+    # Remove long device source files from R2 — keep only the AI clip
     for src in sources:
         if str(src.get("kind") or "").lower() != "device":
             continue
         sp = str(src.get("storage_path") or "").strip()
-        bucket = str(src.get("storage_bucket") or "short-previews").strip()
         if not sp:
             continue
         try:
-            sb.storage.from_(bucket).remove([sp])
-            print(f"[CLIPPING] deleted source {bucket}/{sp}")
+            if r2_configured():
+                delete_object(sp)
+                print(f"[CLIPPING] deleted R2 source {sp}")
         except Exception as exc:
             print(f"[CLIPPING] source cleanup skipped: {exc}")
 
     # Also wipe any leftover files under clipping/{job_id}/
     try:
-        folder = f"{user_id}/clipping/{job_id}"
-        listed = sb.storage.from_("short-previews").list(folder)
-        names = [f"{folder}/{x['name']}" for x in (listed or []) if x.get("name")]
-        if names:
-            sb.storage.from_("short-previews").remove(names)
-            print(f"[CLIPPING] cleared folder {folder} ({len(names)} files)")
+        if r2_configured():
+            folder = f"{user_id}/clipping/{job_id}"
+            n = delete_prefix(folder)
+            if n:
+                print(f"[CLIPPING] cleared R2 folder {folder} ({n} files)")
     except Exception as exc:
         print(f"[CLIPPING] folder cleanup skipped: {exc}")
 
@@ -453,18 +472,17 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
     user_id = job["user_id"]
     meta0 = _job_meta(job)
 
-    bucket = str(meta0.get("source_storage_bucket") or "short-previews").strip()
+    bucket = str(meta0.get("source_storage_bucket") or media_bucket()).strip()
     path = str(meta0.get("source_storage_path") or "").strip()
     url = str(meta0.get("source_preview_url") or "").strip()
 
     source = work / "source.mp4"
     source.parent.mkdir(parents=True, exist_ok=True)
-    if path:
+    if path and r2_configured():
         try:
-            data = sb.storage.from_(bucket).download(path)
-            source.write_bytes(data)
+            download_object(path, source, bucket=bucket if bucket else None)
         except Exception as exc:
-            print(f"[REEDIT] storage download failed: {exc}")
+            print(f"[REEDIT] R2 download failed: {exc}")
             path = ""
     need_http = (not path) or (not source.exists()) or source.stat().st_size < 1000
     if need_http and url:
@@ -533,16 +551,18 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
     if music_mode in ("auto", "track"):
         db.update_job(sb, job_id, status="fetching_media")
         try:
-            preferred = [music_track_id] if music_track_id else None
-            track = download_background_music(
-                "energetic soundtrack",
+            training = merge_optional_training(sb, user_id, {})
+            track, music_attr = fetch_background_music(
+                sb,
+                user_id,
+                job_id,
                 work / "music",
-                exclude_ids=set(),
-                preferred_ids=preferred,
+                training,
+                music_track_id=music_track_id if music_mode == "track" else None,
+                default_mood="energetic soundtrack",
             )
             if track and track.path:
                 music_path = track.path
-                music_attr = attribution_line(track)
         except Exception as exc:
             print(f"[REEDIT] music skipped: {exc}")
 
@@ -667,13 +687,17 @@ def process_job(job: dict) -> None:
             aspect, out_w, out_h = _aspect_size(str(meta0.get("aspect_ratio") or "9:16"))
             print(f"[CREATIVITY] render size {out_w}x{out_h} ({aspect})")
 
-            training = {
-                "voice_id": settings.elevenlabs_voice_id,
-                "duration_auto": duration_auto,
-                "duration_seconds": fixed_dur or 30,
-                "music_mood": "cinematic emotional",
-                "pexels_query": "cinematic lifestyle",
-            }
+            training = merge_optional_training(
+                sb,
+                user_id,
+                {
+                    "voice_id": settings.elevenlabs_voice_id,
+                    "duration_auto": duration_auto,
+                    "duration_seconds": fixed_dur or 30,
+                    "music_mood": "cinematic emotional",
+                    "pexels_query": "cinematic lifestyle",
+                },
+            )
             meta0 = {
                 **meta0,
                 "source": "creativity",
@@ -682,7 +706,7 @@ def process_job(job: dict) -> None:
                 "aspect_ratio": aspect,
                 "output_size": [out_w, out_h],
                 "youtube_channel_id": None,
-                "used_ai_training": False,
+                "used_ai_training": bool(db.get_training(sb, user_id)),
             }
             # Persist mode early so UI/debug show correct pipeline even if later steps fail
             db.update_job(
@@ -919,8 +943,8 @@ def process_job(job: dict) -> None:
             if is_creativity
             else _clip_count_for_duration(base_clips, dur_for_clips)
         )
-        used_pexels = db.used_media_ids(sb, user_id, "pexels", days=avoid_days)
-        used_jamendo = db.used_media_ids(sb, user_id, "jamendo", days=avoid_days)
+        used_pexels = exclude_used_media(sb, user_id, "pexels", avoid_days=avoid_days)
+        print(f"[MEDIA] pexels exclude={len(used_pexels)} jamendo history tracked per user")
 
         db.update_job(sb, job_id, status="fetching_media")
         queries = [
@@ -949,54 +973,11 @@ def process_job(job: dict) -> None:
         music_prefs = training.get("music_prefs") or {}
         if isinstance(music_prefs, str):
             try:
-                import json as _json
-
-                music_prefs = _json.loads(music_prefs)
+                music_prefs = json.loads(music_prefs)
             except Exception:
                 music_prefs = {}
         if not isinstance(music_prefs, dict):
             music_prefs = {}
-
-        preferred_ids = [
-            str(x)
-            for x in (music_prefs.get("selected_track_ids") or [])
-            if x
-        ]
-        # Custom group tracks if active group is custom
-        active_gid = str(
-            training.get("music_group")
-            or music_prefs.get("active_group_id")
-            or ""
-        ).strip()
-        for cg in music_prefs.get("custom_groups") or []:
-            if not isinstance(cg, dict):
-                continue
-            if str(cg.get("id") or "") == active_gid:
-                preferred_ids = [
-                    str(t.get("id") if isinstance(t, dict) else t)
-                    for t in (cg.get("tracks") or [])
-                    if t
-                ] + preferred_ids
-                break
-
-        # Built-in group id → search mood (no forced motivational bias)
-        group_mood_map = {
-            "epic": "epic soundtrack orchestral",
-            "motivational": "motivational energetic upbeat",
-            "dark": "dark ambient electronic intense",
-            "calm": "calm ambient chill relaxing",
-            "upbeat": "happy upbeat pop energetic",
-            "lofi": "lofi chill ambient",
-            "workout": "workout energetic hiphop electronic",
-            "luxury": "luxury ambient cinematic soft",
-        }
-        music_mood = (
-            group_mood_map.get(active_gid)
-            or str(script_data.get("music_mood") or "").strip()
-            or str(montage.get("music_mood") or "").strip()
-            or str(training.get("music_mood") or "").strip()
-            or "cinematic soundtrack"
-        )
 
         user_music_vol = training.get("music_volume")
         try:
@@ -1011,7 +992,7 @@ def process_job(job: dict) -> None:
             body_vol = float(montage.get("music_volume_body") or 0.58)
 
         voice_vol_raw = training.get("voice_volume")
-        if voice_vol_raw is None and isinstance(music_prefs, dict):
+        if voice_vol_raw is None:
             voice_vol_raw = music_prefs.get("voice_volume")
         if voice_vol_raw is None:
             voice_vol_raw = montage.get("voice_volume")
@@ -1020,28 +1001,20 @@ def process_job(job: dict) -> None:
         except (TypeError, ValueError):
             voice_vol = 1.05
 
-        jamendo = download_background_music(
-            music_mood,
+        jamendo, credit = fetch_background_music(
+            sb,
+            user_id,
+            job_id,
             work / "music.mp3",
-            exclude_ids=used_jamendo,
-            preferred_ids=preferred_ids,
-            force_mood_bias=False,
+            training,
+            script_mood=str(script_data.get("music_mood") or "").strip() or None,
         )
-        music_path = jamendo.path
-        if music_path is None or not music_path.exists():
-            raise RuntimeError("Background music missing after download/fallback")
-        if jamendo.id not in ("local", "generated"):
-            db.record_media_usage(
-                sb,
-                user_id=user_id,
-                provider="jamendo",
-                asset_id=jamendo.id,
-                job_id=job_id,
-                title=jamendo.name,
-                meta={"artist": jamendo.artist},
+        if not jamendo or jamendo.path is None or not jamendo.path.exists():
+            raise RuntimeError(
+                "No music in your library. Open Music → create a genre and upload tracks."
             )
+        music_path = jamendo.path
         print(f"Background music ready: {music_path} ({music_path.stat().st_size} bytes)")
-        credit = attribution_line(jamendo)
         description = script_data["description"]
         meta = {
             **meta0,
