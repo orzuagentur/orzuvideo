@@ -350,7 +350,7 @@ Hard requirements:
                 messages=[
                     {
                         "role": "system",
-                        content=(
+                        "content": (
                             "Expand the spoken narration to the target length. "
                             "Keep the SAME language, topic, and hook. "
                             f"Target about {need} words (~{target} seconds). "
@@ -359,7 +359,7 @@ Hard requirements:
                     },
                     {
                         "role": "user",
-                        content=(
+                        "content": (
                             f"Target seconds: {target}\n"
                             f"Current script:\n{script}\n"
                             f"User prompt:\n{prompt}"
