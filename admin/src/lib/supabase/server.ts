@@ -1,47 +1,7 @@
+import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
-import {
-  getOwnerUserId,
-  isAdminAuthenticated,
-} from "@/lib/admin-auth";
-
-/**
- * Server Supabase client for admin APIs.
- * Uses the service role (bypasses RLS) and exposes auth.getUser() as the
- * configured ADMIN_OWNER_USER_ID when the admin session cookie is valid.
- * Completely independent from the client app's cookie/auth stack.
- */
-export async function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error("Supabase service credentials are not configured");
-  }
-
-  const sb = createSupabaseClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  const ok = await isAdminAuthenticated();
-  let ownerId: string | null = null;
-  if (ok) {
-    try {
-      ownerId = getOwnerUserId();
-    } catch {
-      ownerId = null;
-    }
-  }
-
-  return Object.assign(sb, {
-    auth: {
-      getUser: async () => ({
-        data: {
-          user: ownerId ? ({ id: ownerId } as { id: string }) : null,
-        },
-        error: null,
-      }),
-    },
-  });
-}
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
 
 export function createServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -51,5 +11,86 @@ export function createServiceClient() {
   }
   return createSupabaseClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+/** Cookie-aware Supabase client (user session from admin login). */
+export async function createUserClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    throw new Error("Supabase anon credentials are not configured");
+  }
+
+  const cookieStore = await cookies();
+
+  return createServerClient(url, anon, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
+      },
+      setAll(cookiesToSet) {
+        try {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options),
+          );
+        } catch {
+          // Called from a Server Component — middleware refreshes sessions.
+        }
+      },
+    },
+  });
+}
+
+export async function getAdminUser(): Promise<{
+  id: string;
+  email: string | null;
+} | null> {
+  const supabase = await createUserClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("is_admin,email")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (!profile?.is_admin) return null;
+
+  return {
+    id: user.id,
+    email: profile.email || user.email || null,
+  };
+}
+
+export async function isAdminAuthenticated(): Promise<boolean> {
+  return Boolean(await getAdminUser());
+}
+
+export async function requireAdminApi(): Promise<NextResponse | null> {
+  if (await isAdminAuthenticated()) return null;
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+/**
+ * Service-role client for admin APIs, scoped so auth.getUser() returns
+ * the signed-in admin (for music/media library ownership).
+ */
+export async function createClient() {
+  const admin = await getAdminUser();
+  const sb = createServiceClient();
+
+  return Object.assign(sb, {
+    auth: {
+      getUser: async () => ({
+        data: {
+          user: admin ? ({ id: admin.id } as { id: string }) : null,
+        },
+        error: null,
+      }),
+    },
   });
 }

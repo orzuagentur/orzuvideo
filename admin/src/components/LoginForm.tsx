@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 
 export function LoginForm() {
   const router = useRouter();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -17,7 +18,10 @@ export function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -44,9 +48,22 @@ export function LoginForm() {
             OrzuAi Admin
           </h1>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            Private console — not indexed, password only.
+            Sign in with a Supabase account marked as admin.
           </p>
         </div>
+        <label className="block space-y-2">
+          <span className="text-xs uppercase tracking-wide text-[color:var(--muted)]">
+            Email
+          </span>
+          <input
+            type="email"
+            autoComplete="username"
+            className="field"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
         <label className="block space-y-2">
           <span className="text-xs uppercase tracking-wide text-[color:var(--muted)]">
             Password
@@ -58,7 +75,7 @@ export function LoginForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            minLength={8}
+            minLength={6}
           />
         </label>
         {error && (
@@ -69,7 +86,7 @@ export function LoginForm() {
           disabled={loading}
           className="w-full rounded-xl bg-[color:var(--accent)] px-4 py-3 text-sm font-semibold text-black transition hover:brightness-110 disabled:opacity-60"
         >
-          {loading ? "Checking…" : "Enter"}
+          {loading ? "Checking…" : "Sign in"}
         </button>
       </form>
     </div>

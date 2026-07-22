@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import {
+  createServiceClient,
+  isAdminAuthenticated,
+} from "@/lib/supabase/server";
 import type { UsageEvent } from "@/lib/types";
 
 export const runtime = "nodejs";

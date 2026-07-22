@@ -18,6 +18,7 @@ export type AdminUser = {
   youtube_connected: boolean;
   youtube_channel_title: string | null;
   daily_videos_enabled: boolean;
+  is_admin: boolean;
   created_at: string | null;
   job_count: number;
   cost_usd_month: number;

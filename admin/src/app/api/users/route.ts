@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase/server";
-import { isAdminAuthenticated } from "@/lib/admin-auth";
+import {
+  createServiceClient,
+  isAdminAuthenticated,
+} from "@/lib/supabase/server";
 import type { AdminUser } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -20,7 +22,7 @@ export async function GET() {
   const { data: profiles, error } = await sb
     .from("profiles")
     .select(
-      "id,email,display_name,youtube_connected,youtube_channel_title,daily_videos_enabled,created_at",
+      "id,email,display_name,youtube_connected,youtube_channel_title,daily_videos_enabled,is_admin,created_at",
     )
     .order("created_at", { ascending: false })
     .limit(500);
@@ -64,6 +66,7 @@ export async function GET() {
     youtube_connected: Boolean(p.youtube_connected),
     youtube_channel_title: p.youtube_channel_title,
     daily_videos_enabled: Boolean(p.daily_videos_enabled),
+    is_admin: Boolean(p.is_admin),
     created_at: p.created_at,
     job_count: jobCounts.get(p.id) || 0,
     cost_usd_month: costMap.get(p.id) || 0,

@@ -59,6 +59,7 @@ export function UsersStudio() {
             <thead className="border-b border-[color:var(--line)] text-xs uppercase tracking-wide text-[color:var(--muted)]">
               <tr>
                 <th className="px-4 py-3 font-medium">User</th>
+                <th className="px-4 py-3 font-medium">Role</th>
                 <th className="px-4 py-3 font-medium">YouTube</th>
                 <th className="px-4 py-3 font-medium">Jobs</th>
                 <th className="px-4 py-3 font-medium">Cost / mo</th>
@@ -68,14 +69,14 @@ export function UsersStudio() {
             <tbody className="divide-y divide-[color:var(--line)]">
               {loading && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-[color:var(--muted)]">
+                  <td colSpan={6} className="px-4 py-8 text-[color:var(--muted)]">
                     Loading…
                   </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-[color:var(--muted)]">
+                  <td colSpan={6} className="px-4 py-8 text-[color:var(--muted)]">
                     No users found.
                   </td>
                 </tr>
@@ -92,6 +93,13 @@ export function UsersStudio() {
                     <p className="mt-0.5 font-mono text-[10px] text-[color:var(--muted)]">
                       {u.id}
                     </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    {u.is_admin ? (
+                      <span className="text-[color:var(--accent)]">Admin</span>
+                    ) : (
+                      <span className="text-[color:var(--muted)]">User</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {u.youtube_connected ? (

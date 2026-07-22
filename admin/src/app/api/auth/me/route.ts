@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
-import { getOwnerUserId, isAdminAuthenticated } from "@/lib/admin-auth";
+import { getAdminUser } from "@/lib/supabase/server";
 
 export async function GET() {
-  if (!(await isAdminAuthenticated())) {
+  const admin = await getAdminUser();
+  if (!admin) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  try {
-    return NextResponse.json({ userId: getOwnerUserId() });
-  } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Misconfigured" },
-      { status: 500 },
-    );
-  }
+  return NextResponse.json({
+    userId: admin.id,
+    email: admin.email,
+  });
 }
