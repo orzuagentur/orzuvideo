@@ -24,6 +24,12 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createUserClient();
+  if (!supabase) {
+    return NextResponse.json(
+      { error: "Supabase is not configured" },
+      { status: 500 },
+    );
+  }
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,

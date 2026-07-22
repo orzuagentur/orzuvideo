@@ -16,11 +16,9 @@ export function createServiceClient() {
 
 /** Cookie-aware Supabase client (user session from admin login). */
 export async function createUserClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) {
-    throw new Error("Supabase anon credentials are not configured");
-  }
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!url || !anon) return null;
 
   const cookieStore = await cookies();
 
@@ -46,24 +44,30 @@ export async function getAdminUser(): Promise<{
   id: string;
   email: string | null;
 } | null> {
-  const supabase = await createUserClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  try {
+    const supabase = await createUserClient();
+    if (!supabase) return null;
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("is_admin,email")
-    .eq("id", user.id)
-    .maybeSingle();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
 
-  if (!profile?.is_admin) return null;
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("is_admin,email")
+      .eq("id", user.id)
+      .maybeSingle();
 
-  return {
-    id: user.id,
-    email: profile.email || user.email || null,
-  };
+    if (!profile?.is_admin) return null;
+
+    return {
+      id: user.id,
+      email: profile.email || user.email || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function isAdminAuthenticated(): Promise<boolean> {
