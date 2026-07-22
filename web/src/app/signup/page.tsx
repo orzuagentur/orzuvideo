@@ -12,6 +12,7 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -25,19 +26,39 @@ export default function SignupPage() {
       password,
     });
 
-    setLoading(false);
     if (err) {
+      setLoading(false);
       setError(err.message);
       return;
     }
 
     if (data.session) {
-      router.push("/dashboard");
+      await fetch("/api/auth/otp/send", { method: "POST" });
+      setLoading(false);
+      router.push("/login/verify");
       router.refresh();
       return;
     }
 
+    setLoading(false);
     setInfo("Check your email to confirm, then log in.");
+  }
+
+  async function signUpWithGoogle() {
+    setGoogleLoading(true);
+    setError(null);
+    const supabase = createClient();
+    const origin = window.location.origin;
+    const { error: err } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${origin}/auth/callback?next=/dashboard`,
+      },
+    });
+    if (err) {
+      setGoogleLoading(false);
+      setError(err.message);
+    }
   }
 
   return (
@@ -52,9 +73,25 @@ export default function SignupPage() {
       <div className="panel rise p-7">
         <h1 className="text-2xl font-semibold">Create account</h1>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
-          Email signup. Connect YouTube and train AI next.
+          Sign up with Google or email. Connect YouTube and train AI next.
         </p>
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
+
+        <button
+          type="button"
+          onClick={() => void signUpWithGoogle()}
+          disabled={googleLoading || loading}
+          className="btn mt-6 w-full border border-[color:var(--line)] bg-transparent"
+        >
+          {googleLoading ? "Redirecting…" : "Continue with Google"}
+        </button>
+
+        <div className="my-5 flex items-center gap-3 text-xs text-[color:var(--muted)]">
+          <span className="h-px flex-1 bg-[color:var(--line)]" />
+          or email
+          <span className="h-px flex-1 bg-[color:var(--line)]" />
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-4">
           <input
             className="field"
             type="email"

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Sans, Syne } from "next/font/google";
+import { PwaRegister } from "@/components/PwaRegister";
 import "./globals.css";
 
 const syne = Syne({
@@ -17,6 +18,20 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "OrzuAi Admin",
   description: "Private admin console",
+  applicationName: "OrzuAi Admin",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "OrzuAdmin",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+  },
   robots: {
     index: false,
     follow: false,
@@ -34,9 +49,12 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0c0c0c",
+  themeColor: "#0c0d10",
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
@@ -50,7 +68,10 @@ export default function RootLayout({
         <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
         <meta name="googlebot" content="noindex, nofollow, noarchive, nosnippet" />
       </head>
-      <body className="min-h-full antialiased">{children}</body>
+      <body className="min-h-full antialiased">
+        {children}
+        <PwaRegister />
+      </body>
     </html>
   );
 }

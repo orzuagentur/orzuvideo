@@ -8,6 +8,8 @@ export type SourceCategory =
   | "hosting"
   | "render"
   | "assets"
+  | "email"
+  | "domains"
   | "legacy";
 
 export type SourceEntry = {
@@ -251,6 +253,44 @@ export const SOURCES: SourceEntry[] = [
     ],
     envKeys: ["(same as Cloudflare R2 + Supabase)"],
     status: "active",
+  },
+  {
+    id: "resend",
+    name: "Resend",
+    tagline: "Transactional email API",
+    category: "email",
+    categoryLabel: "Email",
+    website: "https://resend.com",
+    usedIn: ["Web app", "Admin Email"],
+    purpose:
+      "Sends all OrzuAi product emails through one branded HTML template: welcome, login OTP, password reset, reset success, and new-device alerts.",
+    details: [
+      "API key: RESEND_API_KEY on the web (and admin) Vercel projects.",
+      "From address stored in email_settings (editable in Admin → Email).",
+      "Until a custom domain is verified, use onboarding@resend.dev for tests.",
+      "Admin Email section previews every template card.",
+    ],
+    envKeys: ["RESEND_API_KEY", "RESEND_FROM_EMAIL"],
+    status: "active",
+  },
+  {
+    id: "namecheap",
+    name: "Namecheap",
+    tagline: "Domains & professional email",
+    category: "domains",
+    categoryLabel: "Domains",
+    website: "https://www.namecheap.com",
+    usedIn: ["DNS", "Mailbox / forwarding"],
+    purpose:
+      "Buy and manage the OrzuAi domain and optional professional mailboxes. Point DNS (SPF/DKIM/DMARC) at Resend for deliverability.",
+    details: [
+      "Purchase/renew domain (e.g. orzuai.com / mail subdomain).",
+      "Add Resend DNS records from the Resend domain wizard.",
+      "Optional Namecheap Private Email or forwarding to support inbox.",
+      "Not an in-app API — ops dependency documented here for the team.",
+    ],
+    envKeys: [],
+    status: "infra",
   },
   {
     id: "jamendo",

@@ -31,8 +31,15 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isAuthPage = path.startsWith("/login") || path.startsWith("/signup");
-  const isProtected = path.startsWith("/dashboard") || path.startsWith("/training");
+  const isAuthPage =
+    path.startsWith("/login") ||
+    path.startsWith("/signup") ||
+    path.startsWith("/auth/forgot-password") ||
+    path.startsWith("/auth/reset-password");
+  const isVerifyPage = path.startsWith("/login/verify");
+  const isProtected =
+    path.startsWith("/dashboard") || path.startsWith("/training");
+  const isAuthCallback = path.startsWith("/auth/callback");
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
@@ -40,12 +47,43 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthPage) {
+  if (!user && isVerifyPage) {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
+  if (user && isAuthPage && !isVerifyPage) {
+    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
+    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
+    if (otpOk === "1" && otpUid === user.id) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (user && isProtected) {
+    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
+    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
+    if (!(otpOk === "1" && otpUid === user.id)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login/verify";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  if (user && isVerifyPage) {
+    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
+    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
+    if (otpOk === "1" && otpUid === user.id) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/dashboard";
+      return NextResponse.redirect(url);
+    }
+  }
+
+  void isAuthCallback;
   return supabaseResponse;
 }
 
