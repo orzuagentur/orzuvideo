@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt } from "crypto";
 import { Resend } from "resend";
 import { createServiceClient } from "@/lib/supabase/middleware";
+import { composeFromHeader, parseDisplayName, parseEmailAddress } from "@/lib/email/from";
 
 export function appUrl(): string {
   return (
@@ -33,10 +34,19 @@ export async function getEmailFromAddress(): Promise<string> {
     const sb = createServiceClient();
     const { data } = await sb
       .from("email_settings")
-      .select("from_email")
+      .select("from_email,from_name")
       .eq("id", 1)
       .maybeSingle();
-    return (data?.from_email || fallback).trim() || fallback;
+
+    if (!data) return fallback;
+
+    const address = parseEmailAddress(data.from_email || fallback);
+    const name =
+      (data.from_name || "").trim() ||
+      parseDisplayName(data.from_email || "") ||
+      parseDisplayName(fallback) ||
+      "Support";
+    return composeFromHeader(name, address || fallback);
   } catch {
     return fallback;
   }

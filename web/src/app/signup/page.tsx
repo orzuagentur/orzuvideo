@@ -10,7 +10,6 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -18,30 +17,25 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    setInfo(null);
 
-    const supabase = createClient();
-    const { data, error: err } = await supabase.auth.signUp({
-      email,
-      password,
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
-
-    if (err) {
-      setLoading(false);
-      setError(err.message);
-      return;
-    }
-
-    if (data.session) {
-      await fetch("/api/auth/otp/send", { method: "POST" });
-      setLoading(false);
-      router.push("/login/verify");
-      router.refresh();
-      return;
-    }
-
+    const data = await res.json().catch(() => ({}));
     setLoading(false);
-    setInfo("Check your email to confirm, then log in.");
+
+    if (!res.ok) {
+      setError(data.error || "Could not create account");
+      return;
+    }
+
+    if (data.devCode) {
+      sessionStorage.setItem("orzu_dev_otp", String(data.devCode));
+    }
+    router.push("/login/verify?mode=signup");
+    router.refresh();
   }
 
   async function signUpWithGoogle() {
@@ -73,7 +67,8 @@ export default function SignupPage() {
       <div className="panel rise p-7">
         <h1 className="text-2xl font-semibold">Create account</h1>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
-          Sign up with Google or email. Connect YouTube and train AI next.
+          Sign up with Google or email. We’ll send a verification code to your
+          inbox.
         </p>
 
         <button
@@ -99,6 +94,7 @@ export default function SignupPage() {
             placeholder="Email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
           />
           <input
             className="field"
@@ -108,9 +104,9 @@ export default function SignupPage() {
             placeholder="Password (min 6)"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
           />
           {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
-          {info && <p className="text-sm text-[color:var(--success)]">{info}</p>}
           <button className="btn btn-primary w-full" disabled={loading}>
             {loading ? "Creating…" : "Sign up"}
           </button>

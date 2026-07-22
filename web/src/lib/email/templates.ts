@@ -1,5 +1,8 @@
 /** Unified OrzuAi transactional email shell + catalog. */
 
+export const SUPPORT_EMAIL = "support@orzuai.com";
+export const SUPPORT_CONTACT = `Support <${SUPPORT_EMAIL}>`;
+
 export type EmailTemplateId =
   | "welcome"
   | "login_otp"
@@ -19,39 +22,40 @@ export const EMAIL_TEMPLATES: EmailTemplateMeta[] = [
   {
     id: "welcome",
     name: "Welcome",
-    when: "Sent once when a user successfully creates an account (first registration).",
+    when: "Sent once after the first successful verification on a new account.",
     subject: "Welcome to OrzuAi",
     previewBody:
-      "Thanks for joining OrzuAi. Train once — we create and publish Shorts for you every day.",
+      "Your account is ready. Connect YouTube and start training.",
   },
   {
     id: "login_otp",
-    name: "Login verification code",
-    when: "Sent after a correct email/password login, before access to the platform.",
-    subject: "Your OrzuAi login code",
+    name: "Verification code",
+    when:
+      "Sent when creating an account or logging in with email/password — before access to the platform.",
+    subject: "Your OrzuAi verification code",
     previewBody: "Your verification code is 123456. It expires in 10 minutes.",
   },
   {
     id: "password_reset",
     name: "Password reset link",
-    when: "Sent when the user taps Forgot password on the login screen.",
+    when: "Sent when the user requests a password reset from the login screen.",
     subject: "Reset your OrzuAi password",
-    previewBody: "Use the button below to choose a new password. The link expires in 1 hour.",
+    previewBody: "Secure link to set a new password. Expires in 1 hour.",
   },
   {
     id: "password_reset_success",
     name: "Password changed",
     when: "Sent after a password reset is completed successfully.",
     subject: "Your OrzuAi password was updated",
-    previewBody: "Your password was changed. If this wasn’t you, reset it again immediately.",
+    previewBody: "Confirmation that the password change succeeded.",
   },
   {
     id: "new_device_login",
     name: "New device login",
-    when: "Sent when someone signs in from a device that hasn’t been seen before.",
-    subject: "New sign-in to OrzuAi",
-    previewBody:
-      "A new device signed in: Chrome on Windows · Approximate location · IP.",
+    when:
+      "Sent when someone signs in from a new device or a different IP. Not sent on the first login.",
+    subject: "Security alert: new sign-in to OrzuAi",
+    previewBody: "Device, IP, location, and time of the unexpected sign-in.",
   },
 ];
 
@@ -65,8 +69,23 @@ type ShellOpts = {
   bodyHtml: string;
   ctaLabel?: string;
   ctaUrl?: string;
-  footerNote?: string;
+  /** Extra security line above the shared contact footer */
+  securityNote?: string;
 };
+
+function standardFooter(securityNote?: string): string {
+  const security = securityNote
+    ? `<p style="margin:0 0 10px;color:#9a958c;font-size:12px;line-height:1.5;">${escapeHtml(securityNote)}</p>`
+    : "";
+  return `${security}
+    <p style="margin:0 0 6px;color:#9a958c;font-size:12px;line-height:1.5;">
+      OrzuAi — AI YouTube Shorts
+    </p>
+    <p style="margin:0;color:#9a958c;font-size:12px;line-height:1.5;">
+      Questions or this wasn’t you? Contact
+      <a href="mailto:${SUPPORT_EMAIL}" style="color:#e8a54b;text-decoration:none;">${SUPPORT_EMAIL}</a>
+    </p>`;
+}
 
 /** Single visual template for every OrzuAi transactional email. */
 export function renderEmailShell(opts: ShellOpts): string {
@@ -80,9 +99,6 @@ export function renderEmailShell(opts: ShellOpts): string {
           </a>
         </p>`
       : "";
-  const footer = opts.footerNote
-    ? `<p style="margin:0;color:#9a958c;font-size:12px;line-height:1.5;">${escapeHtml(opts.footerNote)}</p>`
-    : `<p style="margin:0;color:#9a958c;font-size:12px;line-height:1.5;">OrzuAi — AI YouTube Shorts</p>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -111,7 +127,7 @@ export function renderEmailShell(opts: ShellOpts): string {
           </tr>
           <tr>
             <td style="padding:18px 28px 24px;border-top:1px solid rgba(242,239,232,0.1);">
-              ${footer}
+              ${standardFooter(opts.securityNote)}
             </td>
           </tr>
         </table>
@@ -135,26 +151,40 @@ export function buildWelcomeEmail(opts: { name?: string; appUrl: string }) {
   return {
     subject: "Welcome to OrzuAi",
     html: renderEmailShell({
-      title: `Welcome, ${name}`,
-      preheader: "Your OrzuAi account is ready.",
-      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">Thanks for joining OrzuAi. Train once — we create and publish Shorts for you every day.</p>
-        <p style="margin:0;color:#cfcabe;">Open your dashboard to connect YouTube and start training.</p>`,
+      title: `Welcome to OrzuAi, ${name}`,
+      preheader: "Your account is ready.",
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">Thank you for creating your OrzuAi account. You’re all set to train once and let us create and publish Shorts for you.</p>
+        <p style="margin:0;color:#cfcabe;">Open your dashboard to connect YouTube and start training when you’re ready.</p>`,
       ctaLabel: "Open dashboard",
       ctaUrl: `${opts.appUrl.replace(/\/$/, "")}/dashboard`,
+      securityNote: `Need help getting started? Write to us at ${SUPPORT_EMAIL}.`,
     }),
   };
 }
 
-export function buildLoginOtpEmail(opts: { code: string }) {
+export function buildLoginOtpEmail(opts: {
+  code: string;
+  purpose?: "login" | "signup";
+}) {
   const code = opts.code.replace(/\D/g, "").slice(0, 6);
+  const isSignup = opts.purpose === "signup";
   return {
-    subject: "Your OrzuAi login code",
+    subject: isSignup
+      ? "Verify your OrzuAi account"
+      : "Your OrzuAi verification code",
     html: renderEmailShell({
-      title: "Confirm it’s you",
-      preheader: `Your login code is ${code}`,
-      bodyHtml: `<p style="margin:0 0 16px;color:#cfcabe;">Enter this code to finish signing in. It expires in 10 minutes.</p>
+      title: isSignup ? "Verify your new account" : "Verification code",
+      preheader: `Your OrzuAi code is ${code}`,
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">${
+        isSignup
+          ? "Enter this code on the verification screen to finish creating your OrzuAi account."
+          : "Enter this code on the verification screen to finish signing in to OrzuAi."
+      }</p>
+        <p style="margin:0 0 16px;color:#cfcabe;">This code expires in <strong style="color:#f2efe8;">10 minutes</strong>.</p>
         <p style="margin:0;font-size:32px;letter-spacing:0.35em;font-weight:700;color:#e8a54b;">${escapeHtml(code)}</p>`,
-      footerNote: "If you didn’t try to sign in, you can ignore this email.",
+      securityNote: `If you did not ${
+        isSignup ? "create an OrzuAi account" : "try to sign in"
+      }, do not share this code. Contact ${SUPPORT_EMAIL} immediately.`,
     }),
   };
 }
@@ -163,12 +193,13 @@ export function buildPasswordResetEmail(opts: { resetUrl: string }) {
   return {
     subject: "Reset your OrzuAi password",
     html: renderEmailShell({
-      title: "Reset your password",
-      preheader: "Choose a new password for OrzuAi.",
-      bodyHtml: `<p style="margin:0;color:#cfcabe;">We received a request to reset your password. The link expires in 1 hour.</p>`,
-      ctaLabel: "Choose new password",
+      title: "Password reset request",
+      preheader: "Secure link to choose a new OrzuAi password.",
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">We received a request to reset the password for your OrzuAi account.</p>
+        <p style="margin:0;color:#cfcabe;">Click the button below to choose a new password. This link expires in <strong style="color:#f2efe8;">1 hour</strong> and can be used only once.</p>`,
+      ctaLabel: "Choose a new password",
       ctaUrl: opts.resetUrl,
-      footerNote: "If you didn’t ask for this, you can safely ignore this email.",
+      securityNote: `If you did not request a password reset, you can ignore this email — your password will stay the same. For help, contact ${SUPPORT_EMAIL}.`,
     }),
   };
 }
@@ -177,12 +208,13 @@ export function buildPasswordResetSuccessEmail(opts: { appUrl: string }) {
   return {
     subject: "Your OrzuAi password was updated",
     html: renderEmailShell({
-      title: "Password updated",
-      preheader: "Your OrzuAi password was changed.",
-      bodyHtml: `<p style="margin:0;color:#cfcabe;">Your password was changed successfully. You can now sign in with the new password.</p>`,
-      ctaLabel: "Log in",
+      title: "Password updated successfully",
+      preheader: "Your OrzuAi password has been changed.",
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">Your OrzuAi password was changed successfully.</p>
+        <p style="margin:0;color:#cfcabe;">You can now sign in with your new password. If you did not make this change, secure your account right away.</p>`,
+      ctaLabel: "Go to log in",
       ctaUrl: `${opts.appUrl.replace(/\/$/, "")}/login`,
-      footerNote: "If this wasn’t you, reset your password again immediately.",
+      securityNote: `If this wasn’t you, reset your password again and contact ${SUPPORT_EMAIL} immediately.`,
     }),
   };
 }
@@ -191,24 +223,31 @@ export function buildNewDeviceEmail(opts: {
   action: string;
   deviceName: string;
   deviceType: string;
+  ip: string;
   location: string;
+  when: string;
+  reason: string;
   appUrl: string;
 }) {
   return {
-    subject: "New sign-in to OrzuAi",
+    subject: "Security alert: new sign-in to OrzuAi",
     html: renderEmailShell({
-      title: "New device sign-in",
-      preheader: `${opts.deviceName} signed in to OrzuAi`,
-      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">Someone signed in to your account from a device we haven’t seen before.</p>
+      title: "New sign-in detected",
+      preheader: `${opts.deviceName} · ${opts.ip}`,
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">A sign-in to your OrzuAi account does not match a device or IP address we have on file.</p>
         <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;font-size:14px;color:#cfcabe;">
-          <tr><td style="padding:6px 0;width:120px;color:#9a958c;">Action</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.action)}</td></tr>
+          <tr><td style="padding:6px 0;width:130px;color:#9a958c;">Reason</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.reason)}</td></tr>
+          <tr><td style="padding:6px 0;color:#9a958c;">Action</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.action)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">Device</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.deviceName)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">Type</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.deviceType)}</td></tr>
+          <tr><td style="padding:6px 0;color:#9a958c;">IP address</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.ip)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">Location</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.location)}</td></tr>
-        </table>`,
+          <tr><td style="padding:6px 0;color:#9a958c;">When</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.when)}</td></tr>
+        </table>
+        <p style="margin:16px 0 0;color:#cfcabe;">If this was you, no action is needed. If it was not you, change your password and contact Support.</p>`,
       ctaLabel: "Open OrzuAi",
       ctaUrl: `${opts.appUrl.replace(/\/$/, "")}/dashboard`,
-      footerNote: "If this wasn’t you, change your password right away.",
+      securityNote: `Report suspicious activity to ${SUPPORT_EMAIL}.`,
     }),
   };
 }
@@ -219,7 +258,7 @@ export function previewEmailHtml(id: EmailTemplateId, appUrl: string): string {
     case "welcome":
       return buildWelcomeEmail({ name: "Alex", appUrl }).html;
     case "login_otp":
-      return buildLoginOtpEmail({ code: "123456" }).html;
+      return buildLoginOtpEmail({ code: "123456", purpose: "login" }).html;
     case "password_reset":
       return buildPasswordResetEmail({
         resetUrl: `${appUrl.replace(/\/$/, "")}/auth/reset-password?token=preview`,
@@ -228,10 +267,13 @@ export function previewEmailHtml(id: EmailTemplateId, appUrl: string): string {
       return buildPasswordResetSuccessEmail({ appUrl }).html;
     case "new_device_login":
       return buildNewDeviceEmail({
-        action: "Email & password login",
+        action: "Google sign-in",
         deviceName: "Chrome on Windows",
         deviceType: "Desktop",
+        ip: "203.0.113.42",
         location: "Berlin, Germany (approx.)",
+        when: "22 Jul 2026, 21:15 UTC",
+        reason: "New device (not on your saved list)",
         appUrl,
       }).html;
     default:

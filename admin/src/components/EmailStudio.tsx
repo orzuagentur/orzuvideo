@@ -1,17 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EMAIL_TEMPLATES } from "@/lib/email-templates";
+import { composeFromHeader } from "@/lib/email-from";
 
 export function EmailStudio() {
-  const [fromEmail, setFromEmail] = useState("");
-  const [fromName, setFromName] = useState("");
+  const [fromAddress, setFromAddress] = useState("support@orzuai.com");
+  const [fromName, setFromName] = useState("Support");
   const [replyTo, setReplyTo] = useState("");
   const [resendConfigured, setResendConfigured] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+
+  const previewFrom = useMemo(
+    () => composeFromHeader(fromName, fromAddress),
+    [fromName, fromAddress],
+  );
 
   useEffect(() => {
     void (async () => {
@@ -21,8 +27,8 @@ export function EmailStudio() {
         setErr(data.error || "Failed to load email settings");
         return;
       }
-      setFromEmail(data.fromEmail || "");
-      setFromName(data.fromName || "");
+      setFromAddress(data.fromAddress || "support@orzuai.com");
+      setFromName(data.fromName || "Support");
       setReplyTo(data.replyTo || "");
       setResendConfigured(Boolean(data.resendConfigured));
     })();
@@ -35,7 +41,11 @@ export function EmailStudio() {
     const res = await fetch("/api/email/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fromEmail, fromName, replyTo }),
+      body: JSON.stringify({
+        fromAddress,
+        fromName,
+        replyTo,
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setSaving(false);
@@ -43,7 +53,10 @@ export function EmailStudio() {
       setErr(data.error || "Save failed");
       return;
     }
-    setMsg("From address saved");
+    setFromAddress(data.fromAddress || fromAddress);
+    setFromName(data.fromName || fromName);
+    setReplyTo(data.replyTo || "");
+    setMsg(`Saved. Emails will send as: ${data.fromEmail || previewFrom}`);
   }
 
   return (
@@ -53,8 +66,8 @@ export function EmailStudio() {
           Email
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-[color:var(--muted)]">
-          Transactional emails via Resend — one shared OrzuAi template. Open a
-          card to preview the HTML and see when it sends.
+          Transactional emails via Resend — one shared OrzuAi template. Change
+          display name and address; both are used in every outgoing mail.
         </p>
       </header>
 
@@ -75,21 +88,21 @@ export function EmailStudio() {
         </div>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label className="block text-sm">
-            <span className="text-[color:var(--muted)]">From (Resend format)</span>
-            <input
-              className="field mt-1.5 w-full"
-              value={fromEmail}
-              onChange={(e) => setFromEmail(e.target.value)}
-              placeholder="Support <support@orzuai.com>"
-            />
-          </label>
-          <label className="block text-sm">
             <span className="text-[color:var(--muted)]">Display name</span>
             <input
               className="field mt-1.5 w-full"
               value={fromName}
               onChange={(e) => setFromName(e.target.value)}
-              placeholder="OrzuAi"
+              placeholder="Support"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-[color:var(--muted)]">Email address</span>
+            <input
+              className="field mt-1.5 w-full"
+              value={fromAddress}
+              onChange={(e) => setFromAddress(e.target.value)}
+              placeholder="support@orzuai.com"
             />
           </label>
           <label className="block text-sm md:col-span-2">
@@ -102,6 +115,12 @@ export function EmailStudio() {
             />
           </label>
         </div>
+
+        <div className="mt-4 rounded-xl border border-[color:var(--line)] bg-black/20 px-4 py-3 text-sm">
+          <span className="text-[color:var(--muted)]">Will send as · </span>
+          <span className="font-mono text-[color:var(--fg)]">{previewFrom}</span>
+        </div>
+
         {err && <p className="mt-3 text-sm text-[color:var(--danger)]">{err}</p>}
         {msg && <p className="mt-3 text-sm text-[color:var(--success)]">{msg}</p>}
         <button
@@ -110,12 +129,14 @@ export function EmailStudio() {
           disabled={saving}
           className="mt-4 rounded-xl bg-[color:var(--accent)] px-4 py-2.5 text-sm font-semibold text-black disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Save address"}
+          {saving ? "Saving…" : "Save"}
         </button>
         <p className="mt-3 text-xs text-[color:var(--muted)]">
-          Verify the domain in Resend, buy/DNS via Namecheap, then set{" "}
-          <code className="text-[color:var(--fg)]">RESEND_API_KEY</code> on the
-          web + admin Vercel projects.
+          Example: display name <strong>Support</strong> + address{" "}
+          <strong>support@orzuai.com</strong> →{" "}
+          <code className="text-[color:var(--fg)]">
+            Support &lt;support@orzuai.com&gt;
+          </code>
         </p>
       </section>
 

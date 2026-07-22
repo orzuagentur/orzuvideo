@@ -1,7 +1,39 @@
 import { NextResponse } from "next/server";
 import { createServiceClient, getAdminUser } from "@/lib/supabase/server";
+import {
+  composeFromHeader,
+  parseDisplayName,
+  parseEmailAddress,
+} from "@/lib/email-from";
 
 export const runtime = "nodejs";
+
+const DEFAULT_FROM = "Support <support@orzuai.com>";
+
+function normalizeSettings(row: {
+  from_email?: string | null;
+  from_name?: string | null;
+  reply_to?: string | null;
+  updated_at?: string | null;
+} | null) {
+  const envFrom = process.env.RESEND_FROM_EMAIL?.trim() || DEFAULT_FROM;
+  const storedFrom = (row?.from_email || envFrom).trim() || envFrom;
+  const address = parseEmailAddress(storedFrom);
+  const fromName =
+    (row?.from_name || "").trim() ||
+    parseDisplayName(storedFrom) ||
+    "Support";
+  const fromEmail = composeFromHeader(fromName, address || storedFrom);
+
+  return {
+    fromEmail,
+    fromAddress: address || parseEmailAddress(DEFAULT_FROM),
+    fromName,
+    replyTo: row?.reply_to || "",
+    updatedAt: row?.updated_at || null,
+    resendConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
+  };
+}
 
 export async function GET() {
   const admin = await getAdminUser();
@@ -18,16 +50,7 @@ export async function GET() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    fromEmail:
-      data?.from_email ||
-      process.env.RESEND_FROM_EMAIL ||
-      "Support <support@orzuai.com>",
-    fromName: data?.from_name || "OrzuAi",
-    replyTo: data?.reply_to || "",
-    updatedAt: data?.updated_at || null,
-    resendConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
-  });
+  return NextResponse.json(normalizeSettings(data));
 }
 
 export async function PATCH(request: Request) {
@@ -41,13 +64,22 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const fromEmail = String(body.fromEmail || "").trim().slice(0, 200);
   const fromName = String(body.fromName || "").trim().slice(0, 80);
+  const addressInput = String(
+    body.fromAddress || body.fromEmail || "",
+  ).trim().slice(0, 200);
   const replyTo = String(body.replyTo || "").trim().slice(0, 200);
 
-  if (!fromEmail) {
-    return NextResponse.json({ error: "From address required" }, { status: 400 });
+  const address = parseEmailAddress(addressInput);
+  if (!address || !address.includes("@")) {
+    return NextResponse.json(
+      { error: "Valid email address required (e.g. support@orzuai.com)" },
+      { status: 400 },
+    );
   }
+
+  const name = fromName || "Support";
+  const fromEmail = composeFromHeader(name, address);
 
   const sb = createServiceClient();
   const { data, error } = await sb
@@ -55,7 +87,7 @@ export async function PATCH(request: Request) {
     .upsert({
       id: 1,
       from_email: fromEmail,
-      from_name: fromName || "OrzuAi",
+      from_name: name,
       reply_to: replyTo || null,
       updated_at: new Date().toISOString(),
     })
@@ -68,9 +100,6 @@ export async function PATCH(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    fromEmail: data.from_email,
-    fromName: data.from_name,
-    replyTo: data.reply_to || "",
-    updatedAt: data.updated_at,
+    ...normalizeSettings(data),
   });
 }

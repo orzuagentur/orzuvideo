@@ -1,24 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceClient } from "@/lib/supabase/middleware";
 import {
-  appUrl,
-  clientIp,
-  deviceKeyFromRequest,
-  lookupLocation,
-  parseDevice,
-  sendTransactionalEmail,
-} from "@/lib/email/send";
-import {
-  buildNewDeviceEmail,
-  buildWelcomeEmail,
-} from "@/lib/email/templates";
+  recordLoginDevice,
+  sendWelcomeIfNeeded,
+} from "@/lib/email/devices";
 
 export const runtime = "nodejs";
 
 /**
- * After Google OAuth (or any session without OTP gate): welcome + device alert.
- * Marks OTP as satisfied for OAuth providers.
+ * After OAuth / session restore: remember device, welcome once,
+ * alert only on later new device / IP mismatch.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -37,79 +28,22 @@ export async function POST(request: Request) {
   }
 
   const action = String(body.action || "Sign-in").slice(0, 80);
-  const service = createServiceClient();
-  const ua = request.headers.get("user-agent");
-  const { deviceName, deviceType } = parseDevice(ua);
-  const key = deviceKeyFromRequest(request);
-  const ip = clientIp(request);
-  const location = await lookupLocation(ip);
 
-  const { data: existing } = await service
-    .from("auth_devices")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("device_key", key)
-    .maybeSingle();
+  await recordLoginDevice({
+    userId: user.id,
+    email: user.email,
+    request,
+    action,
+  });
 
-  if (existing) {
-    await service
-      .from("auth_devices")
-      .update({
-        last_seen_at: new Date().toISOString(),
-        ip,
-        location,
-        device_name: deviceName,
-        device_type: deviceType,
-        user_agent: ua,
-      })
-      .eq("id", existing.id);
-  } else {
-    await service.from("auth_devices").insert({
-      user_id: user.id,
-      device_key: key,
-      device_name: deviceName,
-      device_type: deviceType,
-      user_agent: ua,
-      ip,
-      location,
-    });
-    const mail = buildNewDeviceEmail({
-      action,
-      deviceName,
-      deviceType,
-      location: `${location}${ip !== "unknown" ? ` · IP ${ip}` : ""}`,
-      appUrl: appUrl(),
-    });
-    void sendTransactionalEmail({
-      to: user.email,
-      subject: mail.subject,
-      html: mail.html,
-    });
-  }
-
-  const { data: profile } = await service
-    .from("profiles")
-    .select("welcome_email_sent_at,display_name")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profile && !profile.welcome_email_sent_at) {
-    const welcome = buildWelcomeEmail({
-      name: profile.display_name || user.email.split("@")[0],
-      appUrl: appUrl(),
-    });
-    const sent = await sendTransactionalEmail({
-      to: user.email,
-      subject: welcome.subject,
-      html: welcome.html,
-    });
-    if (sent.ok) {
-      await service
-        .from("profiles")
-        .update({ welcome_email_sent_at: new Date().toISOString() })
-        .eq("id", user.id);
-    }
-  }
+  await sendWelcomeIfNeeded({
+    userId: user.id,
+    email: user.email,
+    displayName:
+      (user.user_metadata?.full_name as string | undefined) ||
+      (user.user_metadata?.name as string | undefined) ||
+      null,
+  });
 
   const res = NextResponse.json({ ok: true });
   res.cookies.set("orzu_otp_ok", "1", {

@@ -11,13 +11,17 @@ import {
 export function EmailTemplateDetail({ id }: { id: string }) {
   const meta = getEmailTemplate(id);
   const [fromEmail, setFromEmail] = useState("Support <support@orzuai.com>");
+  const [fromName, setFromName] = useState("Support");
   const [html, setHtml] = useState("");
 
   useEffect(() => {
     void (async () => {
       const res = await fetch("/api/email/settings");
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.fromEmail) setFromEmail(data.fromEmail);
+      if (res.ok) {
+        if (data.fromEmail) setFromEmail(data.fromEmail);
+        if (data.fromName) setFromName(data.fromName);
+      }
     })();
     if (meta) {
       setHtml(
@@ -59,6 +63,10 @@ export function EmailTemplateDetail({ id }: { id: string }) {
         <p className="text-sm">
           <span className="text-[color:var(--muted)]">Subject · </span>
           {meta.subject}
+        </p>
+        <p className="text-sm">
+          <span className="text-[color:var(--muted)]">Display name · </span>
+          {fromName}
         </p>
         <p className="text-sm">
           <span className="text-[color:var(--muted)]">From · </span>

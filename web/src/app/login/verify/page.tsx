@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function LoginVerifyPage() {
+function VerifyForm() {
   const router = useRouter();
+  const params = useSearchParams();
+  const isSignup = params.get("mode") === "signup";
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -43,7 +45,11 @@ export default function LoginVerifyPage() {
   async function resend() {
     setResending(true);
     setError(null);
-    const res = await fetch("/api/auth/otp/send", { method: "POST" });
+    const res = await fetch("/api/auth/otp/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose: isSignup ? "signup" : "login" }),
+    });
     const data = await res.json().catch(() => ({}));
     setResending(false);
     if (!res.ok) {
@@ -53,17 +59,83 @@ export default function LoginVerifyPage() {
     if (data.devCode) {
       setInfo(`Dev mode: code is ${data.devCode}`);
     } else {
-      setInfo("A new code was sent to your email.");
+      setInfo("A new verification code was sent to your email.");
     }
   }
 
   async function cancel() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.replace("/login");
+    router.replace(isSignup ? "/signup" : "/login");
     router.refresh();
   }
 
+  return (
+    <div className="panel rise p-7">
+      <h1 className="text-2xl font-semibold">
+        {isSignup ? "Verify your account" : "Check your email"}
+      </h1>
+      <p className="mt-2 text-sm text-[color:var(--muted)]">
+        {isSignup
+          ? "Enter the 6-digit code we sent to finish creating your account."
+          : "Enter the 6-digit code we sent to finish signing in."}
+      </p>
+      <form onSubmit={onSubmit} className="mt-6 space-y-4">
+        <input
+          className="field tracking-[0.35em] text-center text-lg"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          maxLength={6}
+          required
+          placeholder="••••••"
+          value={code}
+          onChange={(e) =>
+            setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+          }
+          autoFocus
+        />
+        {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
+        {info && <p className="text-sm text-[color:var(--success)]">{info}</p>}
+        <button
+          className="btn btn-primary w-full"
+          disabled={loading || code.length !== 6}
+        >
+          {loading
+            ? "Verifying…"
+            : isSignup
+              ? "Confirm & open OrzuAi"
+              : "Confirm & continue"}
+        </button>
+      </form>
+      <div className="mt-5 flex items-center justify-between gap-3 text-sm">
+        <button
+          type="button"
+          className="text-[color:var(--accent)]"
+          disabled={resending}
+          onClick={() => void resend()}
+        >
+          {resending ? "Sending…" : "Resend code"}
+        </button>
+        <button
+          type="button"
+          className="text-[color:var(--muted)]"
+          onClick={() => void cancel()}
+        >
+          {isSignup ? "Back to sign up" : "Back to login"}
+        </button>
+      </div>
+      <p className="mt-6 text-xs text-[color:var(--muted)]">
+        Didn’t get the email? Check spam, or contact{" "}
+        <a className="text-[color:var(--accent)]" href="mailto:support@orzuai.com">
+          support@orzuai.com
+        </a>
+        .
+      </p>
+    </div>
+  );
+}
+
+export default function LoginVerifyPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
       <Link
@@ -73,47 +145,15 @@ export default function LoginVerifyPage() {
       >
         OrzuAi
       </Link>
-      <div className="panel rise p-7">
-        <h1 className="text-2xl font-semibold">Check your email</h1>
-        <p className="mt-2 text-sm text-[color:var(--muted)]">
-          Enter the 6-digit code we sent to finish signing in.
-        </p>
-        <form onSubmit={onSubmit} className="mt-6 space-y-4">
-          <input
-            className="field tracking-[0.35em] text-center text-lg"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            required
-            placeholder="••••••"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            autoFocus
-          />
-          {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
-          {info && <p className="text-sm text-[color:var(--success)]">{info}</p>}
-          <button className="btn btn-primary w-full" disabled={loading || code.length !== 6}>
-            {loading ? "Verifying…" : "Confirm & continue"}
-          </button>
-        </form>
-        <div className="mt-5 flex items-center justify-between gap-3 text-sm">
-          <button
-            type="button"
-            className="text-[color:var(--accent)]"
-            disabled={resending}
-            onClick={() => void resend()}
-          >
-            {resending ? "Sending…" : "Resend code"}
-          </button>
-          <button
-            type="button"
-            className="text-[color:var(--muted)]"
-            onClick={() => void cancel()}
-          >
-            Back to login
-          </button>
-        </div>
-      </div>
+      <Suspense
+        fallback={
+          <div className="panel p-7 text-sm text-[color:var(--muted)]">
+            Loading…
+          </div>
+        }
+      >
+        <VerifyForm />
+      </Suspense>
     </main>
   );
 }
