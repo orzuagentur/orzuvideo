@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { deleteObject, objectSizeBytes, r2Bucket, r2Configured } from "@/lib/r2";
+import { deleteObject, r2Bucket, r2Configured } from "@/lib/r2";
 import { playableObjectUrl } from "@/lib/media-url";
 
 export const runtime = "nodejs";
 
 /**
- * List music tracks (own library).
+ * List platform music tracks (shared catalog).
  * Query: genre_id?, mood?, q?, page?
  */
 export async function GET(request: Request) {
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   let query = supabase
     .from("music_tracks")
     .select(selectWithSize, { count: "exact" })
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .order("created_at", { ascending: false })
     .range(from, to);
 
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     let fallback = supabase
       .from("music_tracks")
       .select(selectBare, { count: "exact" })
-      .eq("user_id", user.id)
+      .eq("is_platform", true)
       .order("created_at", { ascending: false })
       .range(from, to);
     if (genreId) fallback = fallback.eq("genre_id", genreId);
@@ -75,58 +75,62 @@ export async function GET(request: Request) {
 
   const rows = data || [];
 
-  // Backfill missing sizes from R2 (old uploads / before migration 019)
-  if (r2Configured()) {
-    const needSize = rows.filter(
-      (r) =>
-        r.storage_path &&
-        ((r as { file_size_bytes?: number | null }).file_size_bytes == null ||
-          Number((r as { file_size_bytes?: number | null }).file_size_bytes) <=
-            0),
-    );
-    await Promise.all(
-      needSize.slice(0, 40).map(async (r) => {
-        const size = await objectSizeBytes(r.storage_path);
-        if (size == null) return;
-        (r as { file_size_bytes?: number }).file_size_bytes = size;
-        void supabase
-          .from("music_tracks")
-          .update({ file_size_bytes: size })
-          .eq("id", r.id)
-          .eq("user_id", user.id);
+  // Sign playback URLs in small batches so genre pages stay under serverless limits.
+  const items: Array<{
+    id: string;
+    title: string;
+    artist: string;
+    mood: string;
+    durationSec: number | null;
+    storagePath: string;
+    storageBucket: string;
+    publicUrl: string | null;
+    genreId: string;
+    genreName: string | null;
+    genreSlug: string | null;
+    fileSizeBytes: number;
+    createdAt: string;
+    previewUrl: string | null;
+    downloadUrl: string | null;
+  }> = [];
+
+  const BATCH = 25;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const chunk = rows.slice(i, i + BATCH);
+    const mapped = await Promise.all(
+      chunk.map(async (row) => {
+        const g = row.music_genres as
+          | { id: string; name: string; slug: string }
+          | { id: string; name: string; slug: string }[]
+          | null;
+        const genre = Array.isArray(g) ? g[0] : g;
+        const playUrl = await playableObjectUrl(
+          row.storage_path,
+          row.public_url,
+        );
+        return {
+          id: row.id,
+          title: row.title,
+          artist: row.artist,
+          mood: row.mood,
+          durationSec: row.duration_sec,
+          storagePath: row.storage_path,
+          storageBucket: row.storage_bucket,
+          publicUrl: row.public_url,
+          genreId: row.genre_id,
+          genreName: genre?.name || null,
+          genreSlug: genre?.slug || null,
+          fileSizeBytes: Number(
+            (row as { file_size_bytes?: number | null }).file_size_bytes || 0,
+          ),
+          createdAt: row.created_at,
+          previewUrl: playUrl,
+          downloadUrl: playUrl,
+        };
       }),
     );
+    items.push(...mapped);
   }
-
-  const items = await Promise.all(
-    rows.map(async (row) => {
-      const g = row.music_genres as
-        | { id: string; name: string; slug: string }
-        | { id: string; name: string; slug: string }[]
-        | null;
-      const genre = Array.isArray(g) ? g[0] : g;
-      const playUrl = await playableObjectUrl(row.storage_path, row.public_url);
-      return {
-        id: row.id,
-        title: row.title,
-        artist: row.artist,
-        mood: row.mood,
-        durationSec: row.duration_sec,
-        storagePath: row.storage_path,
-        storageBucket: row.storage_bucket,
-        publicUrl: row.public_url,
-        genreId: row.genre_id,
-        genreName: genre?.name || null,
-        genreSlug: genre?.slug || null,
-        fileSizeBytes: Number(
-          (row as { file_size_bytes?: number | null }).file_size_bytes || 0,
-        ),
-        createdAt: row.created_at,
-        previewUrl: playUrl,
-        downloadUrl: playUrl,
-      };
-    }),
-  );
 
   return NextResponse.json({
     items,
@@ -201,7 +205,7 @@ export async function POST(request: Request) {
     const { data: dup } = await supabase
       .from("music_tracks")
       .select("id")
-      .eq("user_id", user.id)
+      .eq("is_platform", true)
       .eq("file_hash", fileHash)
       .maybeSingle();
     if (dup) {
@@ -216,7 +220,7 @@ export async function POST(request: Request) {
     .from("music_genres")
     .select("id")
     .eq("id", genreId)
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .maybeSingle();
   if (gErr || !genre) {
     return NextResponse.json({ error: "Genre not found" }, { status: 400 });
@@ -232,6 +236,7 @@ export async function POST(request: Request) {
     storage_path: storagePath,
     storage_bucket: r2Bucket(),
     public_url: publicUrl,
+    is_platform: true,
   };
   if (fileHash) insertRow.file_hash = fileHash;
   if (fileSizeBytes != null) insertRow.file_size_bytes = fileSizeBytes;
@@ -289,7 +294,7 @@ export async function DELETE(request: Request) {
     .from("music_tracks")
     .select("id,storage_path")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .maybeSingle();
 
   if (fetchErr) {
@@ -311,7 +316,7 @@ export async function DELETE(request: Request) {
     .from("music_tracks")
     .delete()
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("is_platform", true);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     const { data: g } = await supabase
       .from("music_genres")
       .select("id,name,slug")
-      .eq("user_id", user.id)
+      .eq("is_platform", true)
       .eq("slug", groupId)
       .maybeSingle();
     if (g) {
@@ -37,7 +37,7 @@ export async function GET(request: Request) {
       .from("music_genres")
       .select("id,name")
       .eq("id", genreId)
-      .eq("user_id", user.id)
+      .eq("is_platform", true)
       .maybeSingle();
     if (g) label = g.name;
   }
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     .select(
       "id,title,artist,mood,duration_sec,public_url,storage_path,genre_id,music_genres(name,slug)",
     )
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .order("created_at", { ascending: false })
     .limit(40);
 

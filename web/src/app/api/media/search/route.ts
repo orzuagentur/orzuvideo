@@ -179,7 +179,7 @@ async function searchLibraryMusic(
       "id,title,artist,mood,duration_sec,public_url,genre_id,music_genres(name)",
       { count: "exact" },
     )
-    .eq("user_id", userId)
+    .eq("is_platform", true)
     .order("created_at", { ascending: false })
     .range(from, to);
 

@@ -1041,7 +1041,7 @@ def process_job(job: dict) -> None:
         )
         if not jamendo or jamendo.path is None or not jamendo.path.exists():
             raise RuntimeError(
-                "No music in your library. Open Music → create a genre and upload tracks."
+                "No platform music yet. An admin must upload tracks in the admin Music library."
             )
         music_path = jamendo.path
         print(f"Background music ready: {music_path} ({music_path.stat().st_size} bytes)")

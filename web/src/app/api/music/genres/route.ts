@@ -39,7 +39,7 @@ async function purgeSeededGenres(
     .in("slug", [...SEEDED_SLUGS]);
 }
 
-/** List genres with track count + total bytes. */
+/** List shared platform genres with track count + total bytes. */
 export async function GET() {
   const supabase = await createClient();
   const {
@@ -47,12 +47,10 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await purgeSeededGenres(supabase, user.id);
-
   const { data: genres, error } = await supabase
     .from("music_genres")
     .select("id,name,slug,created_at")
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .order("name");
 
   if (error) {
@@ -76,7 +74,7 @@ export async function GET() {
   const withSize = await supabase
     .from("music_tracks")
     .select("id,genre_id,storage_path,file_size_bytes")
-    .eq("user_id", user.id);
+    .eq("is_platform", true);
 
   if (!withSize.error) {
     tracks = withSize.data;
@@ -84,7 +82,7 @@ export async function GET() {
     const bare = await supabase
       .from("music_tracks")
       .select("id,genre_id,storage_path")
-      .eq("user_id", user.id);
+      .eq("is_platform", true);
     if (bare.error) {
       return NextResponse.json({ error: bare.error.message }, { status: 500 });
     }
@@ -102,13 +100,6 @@ export async function GET() {
         const size = await objectSizeBytes(String(t.storage_path));
         if (size == null) return;
         t.file_size_bytes = size;
-        if (t.id) {
-          void supabase
-            .from("music_tracks")
-            .update({ file_size_bytes: size })
-            .eq("id", t.id)
-            .eq("user_id", user.id);
-        }
       }),
     );
   }

@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const { data, error } = await supabase
     .from("music_tracks")
     .select("file_hash")
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .in("file_hash", hashes);
 
   if (error) {

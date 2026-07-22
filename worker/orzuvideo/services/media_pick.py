@@ -110,7 +110,8 @@ def pick_library_track(
     script_mood: str | None = None,
     default_mood: str = "cinematic",
 ) -> dict[str, Any] | None:
-    """Pick best unused track from the user's R2 music library."""
+    """Pick best unused track from the shared platform R2 music library."""
+    _ = user_id  # usage tracking stays per-user; catalog is platform-wide
     ban = {str(x) for x in (exclude_ids or set())}
     preferred = [str(x) for x in (preferred_ids or []) if x and str(x) not in ban]
 
@@ -121,7 +122,7 @@ def pick_library_track(
                 .select(
                     "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
                 )
-                .eq("user_id", user_id)
+                .eq("is_platform", True)
                 .eq("id", tid)
                 .limit(1)
                 .execute()
@@ -138,14 +139,28 @@ def pick_library_track(
             .select(
                 "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
             )
-            .eq("user_id", user_id)
+            .eq("is_platform", True)
             .order("created_at", desc=True)
             .limit(200)
             .execute()
         )
     except Exception as exc:
-        print(f"[LIBRARY] list failed: {exc}")
-        return None
+        # Fallback for DBs that have not run migration 021 yet
+        print(f"[LIBRARY] platform list failed ({exc}); trying user library")
+        try:
+            result = (
+                sb.table("music_tracks")
+                .select(
+                    "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
+                )
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .limit(200)
+                .execute()
+            )
+        except Exception as exc2:
+            print(f"[LIBRARY] list failed: {exc2}")
+            return None
 
     rows = [r for r in (result.data or []) if str(r.get("id")) not in ban]
     if not rows:
@@ -182,7 +197,7 @@ def fetch_background_music(
     script_mood: str | None = None,
     default_mood: str = "cinematic soundtrack",
 ) -> tuple[LibraryTrack | None, str | None]:
-    """Download a track from the user's library (R2) and record usage."""
+    """Download a track from the shared platform library (R2) and record usage."""
     training = training or {}
     music_prefs = _parse_music_prefs(training)
     exclude = exclude_used_media(sb, user_id, "library")

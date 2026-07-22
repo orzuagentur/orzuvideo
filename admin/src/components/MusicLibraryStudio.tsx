@@ -144,7 +144,8 @@ export function MusicLibraryStudio() {
             Music
           </h1>
           <p className="mt-1 text-sm text-[color:var(--muted)]">
-            Your genres only. Upload folders — duplicates are skipped.
+            Platform library — used as background music for every video on
+            OrzuAi.
           </p>
         </div>
         <button

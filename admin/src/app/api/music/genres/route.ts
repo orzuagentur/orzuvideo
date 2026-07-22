@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { objectSizeBytes, r2Configured } from "@/lib/r2";
 
 export const runtime = "nodejs";
 
-/** Old auto-seeded genre slugs — removed so only user-created genres remain. */
+/** Old auto-seeded genre slugs — removed so only curated genres remain. */
 const SEEDED_SLUGS = [
   "epic",
   "motivational",
@@ -27,19 +26,7 @@ function slugify(name: string): string {
   );
 }
 
-/** Remove old auto-seeded starter genres (Epic, Motivational, …). */
-async function purgeSeededGenres(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-) {
-  await supabase
-    .from("music_genres")
-    .delete()
-    .eq("user_id", userId)
-    .in("slug", [...SEEDED_SLUGS]);
-}
-
-/** List genres with track count + total bytes. */
+/** List shared platform genres (fast: DB only, no R2 HEAD). */
 export async function GET() {
   const supabase = await createClient();
   const {
@@ -47,70 +34,42 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  await purgeSeededGenres(supabase, user.id);
-
   const { data: genres, error } = await supabase
     .from("music_genres")
     .select("id,name,slug,created_at")
-    .eq("user_id", user.id)
+    .eq("is_platform", true)
     .order("name");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const list = genres || [];
+  const list = (genres || []).filter(
+    (g) => !SEEDED_SLUGS.includes(g.slug as (typeof SEEDED_SLUGS)[number]),
+  );
   if (!list.length) {
     return NextResponse.json({ items: [] });
   }
 
-  let tracks:
-    | {
-        id?: string;
-        genre_id: string;
-        storage_path?: string;
-        file_size_bytes?: number | null;
-      }[]
-    | null = null;
-
   const withSize = await supabase
     .from("music_tracks")
-    .select("id,genre_id,storage_path,file_size_bytes")
-    .eq("user_id", user.id);
+    .select("genre_id,file_size_bytes")
+    .eq("is_platform", true);
+
+  let tracks: { genre_id: string; file_size_bytes?: number | null }[] | null =
+    null;
 
   if (!withSize.error) {
     tracks = withSize.data;
   } else {
     const bare = await supabase
       .from("music_tracks")
-      .select("id,genre_id,storage_path")
-      .eq("user_id", user.id);
+      .select("genre_id")
+      .eq("is_platform", true);
     if (bare.error) {
       return NextResponse.json({ error: bare.error.message }, { status: 500 });
     }
     tracks = bare.data;
-  }
-
-  if (r2Configured() && tracks?.length) {
-    const missing = tracks.filter(
-      (t) =>
-        t.storage_path &&
-        (t.file_size_bytes == null || Number(t.file_size_bytes) <= 0),
-    );
-    await Promise.all(
-      missing.slice(0, 60).map(async (t) => {
-        const size = await objectSizeBytes(String(t.storage_path));
-        if (size == null) return;
-        t.file_size_bytes = size;
-        if (t.id) {
-          void supabase
-            .from("music_tracks")
-            .update({ file_size_bytes: size })
-            .eq("id", t.id)
-            .eq("user_id", user.id);
-        }
-      }),
-    );
   }
 
   const stats = new Map<string, { count: number; bytes: number }>();
@@ -119,7 +78,9 @@ export async function GET() {
     if (!gid) continue;
     const cur = stats.get(gid) || { count: 0, bytes: 0 };
     cur.count += 1;
-    cur.bytes += Number(t.file_size_bytes || 0);
+    cur.bytes += Number(
+      (t as { file_size_bytes?: number | null }).file_size_bytes || 0,
+    );
     stats.set(gid, cur);
   }
 
@@ -135,7 +96,7 @@ export async function GET() {
   return NextResponse.json({ items });
 }
 
-/** Create a genre. Body: { name } */
+/** Create a platform genre. Body: { name } */
 export async function POST(request: Request) {
   const supabase = await createClient();
   const {
@@ -160,9 +121,23 @@ export async function POST(request: Request) {
   for (let i = 0; i < 8; i++) {
     let trySlug = i === 0 ? slug : `${slug}-${i + 1}`;
     if (blocked.has(trySlug)) trySlug = `${trySlug}-lib`;
+
+    const { data: taken } = await supabase
+      .from("music_genres")
+      .select("id")
+      .eq("is_platform", true)
+      .eq("slug", trySlug)
+      .maybeSingle();
+    if (taken) continue;
+
     const { data, error } = await supabase
       .from("music_genres")
-      .insert({ user_id: user.id, name, slug: trySlug })
+      .insert({
+        user_id: user.id,
+        name,
+        slug: trySlug,
+        is_platform: true,
+      })
       .select("id,name,slug,created_at")
       .single();
     if (!error && data) {
@@ -179,7 +154,7 @@ export async function POST(request: Request) {
   return NextResponse.json({ error: "Could not create genre" }, { status: 500 });
 }
 
-/** Delete genre (+ cascades tracks). ?id= */
+/** Delete platform genre (+ cascades tracks). ?id= */
 export async function DELETE(request: Request) {
   const supabase = await createClient();
   const {
@@ -196,7 +171,7 @@ export async function DELETE(request: Request) {
     .from("music_genres")
     .delete()
     .eq("id", id)
-    .eq("user_id", user.id);
+    .eq("is_platform", true);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
