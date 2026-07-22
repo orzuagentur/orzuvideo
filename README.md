@@ -34,7 +34,7 @@ Flow:
 4. Copy URL, anon key, and service_role key
 
 Finished videos live in **Cloudflare R2** (not Supabase Storage). See [`STORAGE.md`](STORAGE.md).
-Domain / Google / Vercel checklist: [`DOMAIN.md`](DOMAIN.md) (`https://orzuai.com`).
+Domain / Google / Vercel checklist: [`DOMAIN.md`](DOMAIN.md) (`https://www.orzuai.com`).
 
 | What | Where |
 |------|--------|

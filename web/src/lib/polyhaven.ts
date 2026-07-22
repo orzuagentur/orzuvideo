@@ -6,7 +6,7 @@ export const POLYHAVEN_SITE = "https://polyhaven.com";
 
 /** Required when calling the live API — identify the product. */
 export const POLYHAVEN_UA =
-  "OrzuAi/1.0 (+https://orzuai.com; Poly Haven asset browser)";
+  "OrzuAi/1.0 (+https://www.orzuai.com; Poly Haven asset browser)";
 
 export type PolyHavenType = "all" | "hdris" | "textures" | "models";
 

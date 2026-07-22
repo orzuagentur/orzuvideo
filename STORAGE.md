@@ -85,8 +85,8 @@ Optional: `R2_ENDPOINT`, `R2_REGION=auto`
 [
   {
     "AllowedOrigins": [
-      "https://orzuai.com",
       "https://www.orzuai.com",
+      "https://orzuai.com",
       "http://localhost:3000"
     ],
     "AllowedMethods": ["GET", "PUT", "HEAD"],

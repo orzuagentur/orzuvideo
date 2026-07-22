@@ -24,7 +24,7 @@ export default function HomePage() {
           OrzuAi is a creator studio: AI scripts and voice, stock and library
           media, editing tools, your own music library, and optional YouTube
           publishing — from one dashboard at{" "}
-          <span className="text-[color:var(--fg)]">orzuai.com</span>.
+          <span className="text-[color:var(--fg)]">www.orzuai.com</span>.
         </p>
         <div className="mt-10 flex flex-wrap gap-3">
           <Link href="/signup" className="btn btn-primary">

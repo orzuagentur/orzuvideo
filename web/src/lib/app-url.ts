@@ -1,9 +1,10 @@
 /**
- * Canonical production domain for OrzuAi.
- * Local/dev still uses NEXT_PUBLIC_APP_URL from .env.local (localhost).
+ * Canonical production URL (tags / env default): www.
+ * Apex https://orzuai.com stays allowed in Google / Supabase / CORS — not blocked.
+ * Local/dev uses NEXT_PUBLIC_APP_URL from .env.local (localhost).
  */
-export const PRODUCTION_APP_URL = "https://orzuai.com";
-export const PRODUCTION_WWW_URL = "https://www.orzuai.com";
+export const PRODUCTION_APP_URL = "https://www.orzuai.com";
+export const PRODUCTION_APEX_URL = "https://orzuai.com";
 export const PRODUCTION_MEDIA_URL = "https://media.orzuai.com";
 
 export function appUrl(): string {

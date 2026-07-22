@@ -3,7 +3,7 @@ import { LegalArticle, LegalH2, SiteChrome } from "@/components/SiteChrome";
 export const metadata = {
   title: "Terms of Service — OrzuAi",
   description:
-    "Terms governing use of the OrzuAi service at orzuai.com.",
+    "Terms governing use of the OrzuAi service at www.orzuai.com.",
 };
 
 const UPDATED = "July 22, 2026";
@@ -17,9 +17,9 @@ export default function TermsPage() {
           <strong>OrzuAi</strong> at{" "}
           <a
             className="text-[color:var(--accent)] underline-offset-2 hover:underline"
-            href="https://orzuai.com"
+            href="https://www.orzuai.com"
           >
-            https://orzuai.com
+            https://www.orzuai.com
           </a>{" "}
           and related applications (the “Service”). By creating an account or
           using the Service, you agree to these Terms.
@@ -189,9 +189,9 @@ export default function TermsPage() {
           OrzuAi ·{" "}
           <a
             className="text-[color:var(--accent)] underline-offset-2 hover:underline"
-            href="https://orzuai.com"
+            href="https://www.orzuai.com"
           >
-            https://orzuai.com
+            https://www.orzuai.com
           </a>
           <br />
           Email:{" "}

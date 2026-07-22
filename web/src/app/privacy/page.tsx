@@ -3,7 +3,7 @@ import { LegalArticle, LegalH2, SiteChrome } from "@/components/SiteChrome";
 export const metadata = {
   title: "Privacy Policy — OrzuAi",
   description:
-    "How OrzuAi collects, uses, and protects personal data for orzuai.com.",
+    "How OrzuAi collects, uses, and protects personal data for www.orzuai.com.",
 };
 
 const UPDATED = "July 22, 2026";
@@ -15,8 +15,8 @@ export default function PrivacyPage() {
         <p>
           This Privacy Policy explains how <strong>OrzuAi</strong> (“we”, “us”,
           “our”), operating the service at{" "}
-          <a className="text-[color:var(--accent)] underline-offset-2 hover:underline" href="https://orzuai.com">
-            https://orzuai.com
+          <a className="text-[color:var(--accent)] underline-offset-2 hover:underline" href="https://www.orzuai.com">
+            https://www.orzuai.com
           </a>
           , collects and uses information when you use our website and
           dashboard. By using OrzuAi, you agree to this policy.
@@ -213,9 +213,9 @@ export default function PrivacyPage() {
           OrzuAi ·{" "}
           <a
             className="text-[color:var(--accent)] underline-offset-2 hover:underline"
-            href="https://orzuai.com"
+            href="https://www.orzuai.com"
           >
-            https://orzuai.com
+            https://www.orzuai.com
           </a>
           <br />
           Email:{" "}

@@ -64,7 +64,7 @@ export function SiteFooter() {
   return (
     <footer className="mt-16 border-t border-[color:var(--line)] pt-6 text-sm text-[color:var(--muted)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p>© {year} OrzuAi · orzuai.com</p>
+        <p>© {year} OrzuAi · www.orzuai.com</p>
         <div className="flex flex-wrap gap-4">
           <Link href="/" className="hover:text-[color:var(--fg)]">
             Home

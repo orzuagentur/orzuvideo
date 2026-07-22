@@ -1,26 +1,34 @@
-# Domain setup — orzuai.com
+# Domain setup — orzuai.com / www.orzuai.com
 
-Canonical app: **https://orzuai.com**  
-Media CDN (R2): **https://media.orzuai.com**  
-WWW: **https://www.orzuai.com** → redirect to apex
+**Canonical (tags, env, OAuth consent links):** `https://www.orzuai.com`  
+**Also allowed everywhere:** `https://orzuai.com` (apex — do not block)  
+Media CDN (R2): `https://media.orzuai.com`
+
+Rule: use **one** primary URL in env/metadata (`www`), but **whitelist both** hosts in Google, Supabase, R2 CORS, and Vercel Domains so neither is blocked.
 
 ---
 
 ## 1) Vercel (web app)
 
-**Project → Settings → Domains**
+**Project → Settings → Domains** — add **both** (both Valid, neither blocked):
 
-Add:
+- `www.orzuai.com`
 - `orzuai.com`
-- `www.orzuai.com` (redirect to `orzuai.com`)
 
-DNS (Cloudflare or registrar) → point to Vercel as Vercel shows (A / CNAME).
+DNS (Cloudflare) — both must resolve:
 
-**Project → Settings → Environment Variables** (Production):
+| Type | Name | Content | Proxy |
+|------|------|---------|-------|
+| CNAME | `www` | `cname.vercel-dns.com` | Proxied |
+| CNAME | `@` | `cname.vercel-dns.com` | Proxied |
+
+(If apex CNAME is rejected, use A `@` → `76.76.21.21`.)
+
+**Project → Settings → Environment Variables** (Production) — single primary:
 
 ```
-NEXT_PUBLIC_APP_URL=https://orzuai.com
-YOUTUBE_REDIRECT_URI=https://orzuai.com/api/youtube/callback
+NEXT_PUBLIC_APP_URL=https://www.orzuai.com
+YOUTUBE_REDIRECT_URI=https://www.orzuai.com/api/youtube/callback
 R2_PUBLIC_BASE_URL=https://media.orzuai.com
 R2_BUCKET=orzu-media
 R2_ACCOUNT_ID=…
@@ -34,6 +42,25 @@ Also copy all other keys (Supabase, OpenAI, ElevenLabs, Pexels, Jamendo, YouTube
 
 Redeploy after saving env.
 
+### Google OAuth verification (prefer www; apex must also work if used)
+
+Consent screen (same address everywhere):
+
+```
+https://www.orzuai.com
+https://www.orzuai.com/privacy
+https://www.orzuai.com/terms
+```
+
+Check both hosts return 200:
+
+```bash
+curl -I https://www.orzuai.com/
+curl -I https://www.orzuai.com/privacy
+curl -I https://orzuai.com/
+curl -I https://orzuai.com/privacy
+```
+
 ---
 
 ## 2) Google Cloud (YouTube OAuth)
@@ -41,31 +68,31 @@ Redeploy after saving env.
 **Console:** [Google Cloud Console](https://console.cloud.google.com/)  
 → APIs & Services → Credentials → your **OAuth 2.0 Client ID** (Web application)
 
-### Authorized JavaScript origins
+### Authorized JavaScript origins (both hosts + local)
 
 ```
-https://orzuai.com
 https://www.orzuai.com
+https://orzuai.com
 http://localhost:3000
 ```
 
-### Authorized redirect URIs
+### Authorized redirect URIs (both hosts + local)
 
 ```
-https://orzuai.com/api/youtube/callback
 https://www.orzuai.com/api/youtube/callback
+https://orzuai.com/api/youtube/callback
 http://localhost:3000/api/youtube/callback
 ```
 
 Save. Wait 1–5 minutes.
 
-**OAuth consent screen** (if not done):
+**OAuth consent screen**:
 - App name: `OrzuAi`
 - User support email: your email
-- Authorized domains: `orzuai.com` (and `orzuvideo.vercel.app` if still used)
-- Application home page: `https://orzuai.com`
-- Privacy policy: `https://orzuai.com/privacy`
-- Terms of service: `https://orzuai.com/terms`
+- Authorized domains: `orzuai.com`
+- Application home page: `https://www.orzuai.com`
+- Privacy policy: `https://www.orzuai.com/privacy`
+- Terms of service: `https://www.orzuai.com/terms`
 - Scopes: YouTube upload / readonly / force-ssl (already requested in code)
 
 ---
@@ -76,9 +103,9 @@ Save. Wait 1–5 minutes.
 
 | Field | Value |
 |-------|--------|
-| Site URL | `https://orzuai.com` |
-| Redirect URLs | `https://orzuai.com/**` |
-| | `https://www.orzuai.com/**` |
+| Site URL | `https://www.orzuai.com` |
+| Redirect URLs | `https://www.orzuai.com/**` |
+| | `https://orzuai.com/**` |
 | | `http://localhost:3000/**` |
 
 ---
@@ -91,14 +118,14 @@ Save. Wait 1–5 minutes.
 
 ### CORS (R2 bucket → Settings → CORS)
 
-Paste:
+Both app hosts allowed:
 
 ```json
 [
   {
     "AllowedOrigins": [
-      "https://orzuai.com",
       "https://www.orzuai.com",
+      "https://orzuai.com",
       "http://localhost:3000"
     ],
     "AllowedMethods": ["GET", "PUT", "HEAD"],
@@ -125,8 +152,6 @@ Same R2 + Supabase vars as production. Worker does **not** need `NEXT_PUBLIC_APP
 
 ## 6) Local `.env.local` (dev only)
 
-Keep localhost so Google OAuth works on your PC:
-
 ```
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 YOUTUBE_REDIRECT_URI=http://localhost:3000/api/youtube/callback
@@ -141,20 +166,22 @@ Production URLs live in **Vercel env**, not in `.env.local`.
 
 | Куда | Что вставить |
 |------|----------------|
-| Vercel Domains | `orzuai.com`, `www.orzuai.com` |
-| Vercel env `NEXT_PUBLIC_APP_URL` | `https://orzuai.com` |
-| Vercel env `YOUTUBE_REDIRECT_URI` | `https://orzuai.com/api/youtube/callback` |
-| Vercel + Railway `R2_PUBLIC_BASE_URL` | `https://media.orzuai.com` |
-| Google → Origins | `https://orzuai.com` |
-| Google → Redirect | `https://orzuai.com/api/youtube/callback` |
-| Supabase Site URL | `https://orzuai.com` |
-| Cloudflare R2 custom domain | `media.orzuai.com` |
+| Vercel Domains | `www.orzuai.com` **и** `orzuai.com` |
+| Vercel env (primary) | `NEXT_PUBLIC_APP_URL=https://www.orzuai.com` |
+| Vercel env (primary) | `YOUTUBE_REDIRECT_URI=https://www.orzuai.com/api/youtube/callback` |
+| Google → Origins | `https://www.orzuai.com` **и** `https://orzuai.com` |
+| Google → Redirect | оба `…/api/youtube/callback` |
+| Google consent | `https://www.orzuai.com` (+ `/privacy`, `/terms`) |
+| Supabase Site URL | `https://www.orzuai.com` |
+| Supabase Redirect | оба `/**` + localhost |
+| R2 CORS | оба origin + localhost |
+| R2 custom domain | `media.orzuai.com` |
 
 ---
 
 ## Check after deploy
 
-1. Open https://orzuai.com → login works  
-2. Connect YouTube → returns to `/dashboard/channel` (not error)  
-3. Create Creativity / Clipping video → plays from `media.orzuai.com` or signed preview  
-4. Upload from device for clipping → R2 PUT succeeds (CORS OK)
+1. Open https://www.orzuai.com **and** https://orzuai.com → both load  
+2. Connect YouTube → returns to `/dashboard/channel`  
+3. Media from `media.orzuai.com` / signed preview works  
+4. Clipping upload CORS OK from either host
