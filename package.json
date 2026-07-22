@@ -3,7 +3,9 @@
   "private": true,
   "scripts": {
     "dev": "npm run dev --prefix web",
+    "dev:admin": "npm run dev --prefix admin",
     "build": "npm run build --prefix web",
+    "build:admin": "npm run build --prefix admin",
     "start": "npm run start --prefix web",
     "lint": "npm run lint --prefix web",
     "worker": "python worker/main.py"

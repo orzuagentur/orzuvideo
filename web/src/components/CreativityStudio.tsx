@@ -24,6 +24,10 @@ const DURATIONS = [
   { id: "30", label: "30s" },
   { id: "45", label: "45s" },
   { id: "60", label: "60s" },
+  { id: "90", label: "90s" },
+  { id: "120", label: "2 min" },
+  { id: "180", label: "3 min" },
+  { id: "300", label: "5 min" },
 ] as const;
 
 type Aspect = (typeof ASPECTS)[number]["id"];

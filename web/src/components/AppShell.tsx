@@ -25,13 +25,10 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
-  { href: "/dashboard", label: "Media", exact: true },
   { href: "/dashboard/creators", label: "For creators" },
-  { href: "/dashboard/music", label: "Music" },
   { href: "/dashboard/clipping", label: "AI Clipping" },
   { href: "/dashboard/content", label: "Creativity" },
   { href: "/dashboard/favorites", label: "Favorites" },
-  { href: "/dashboard/costs", label: "Costs" },
 ];
 
 type ChannelsCtx = {
@@ -228,9 +225,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const isMedia = pathname === "/dashboard";
   const isCreators = pathname.startsWith("/dashboard/creators");
-  // Media + For creators own the toolbar row (YouTube + search)
+  // For creators owns the toolbar row (YouTube + search)
   const isEditor = pathname.startsWith("/dashboard/editor");
   const ctx = { menuOpen, setMenuOpen };
 
@@ -255,7 +251,7 @@ export function AppShell({
             {/* Tall band so section links sit midway between top of screen and search */}
             <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
               <Link
-                href="/dashboard"
+                href="/dashboard/content"
                 className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.9rem] tracking-[0.03em] md:text-[2.15rem] md:tracking-[0.04em]"
                 style={{ fontWeight: 800, transform: "scaleY(1.12)" }}
               >
@@ -294,8 +290,8 @@ export function AppShell({
               </div>
             </div>
 
-            {/* Media / For creators: YouTube lives in their sticky toolbar next to search */}
-            {!isMedia && !isCreators && (
+            {/* For creators: YouTube lives in sticky toolbar next to search */}
+            {!isCreators && (
               <div className="flex items-center gap-3 px-4 pb-3 md:px-6">
                 <YouTubeChannelsButton />
               </div>

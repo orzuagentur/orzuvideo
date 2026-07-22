@@ -3,7 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { getActiveYoutubeChannel } from "@/lib/youtube-channels";
 
 const ASPECTS = new Set(["9:16", "16:9", "1:1"]);
-const DURATIONS = new Set([15, 30, 45, 60]);
+/** Shorts / clipping */
+const SHORT_DURATIONS = new Set([15, 30, 45, 60]);
+/** Creativity — personal longer videos */
+const CREATIVITY_DURATIONS = new Set([
+  15, 30, 45, 60, 90, 120, 180, 300,
+]);
 
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -62,7 +67,8 @@ export async function POST(request: Request) {
   let duration_seconds: number | null = null;
   if (!durationAuto) {
     const durationRaw = Number(body.duration_seconds);
-    duration_seconds = DURATIONS.has(durationRaw) ? durationRaw : 30;
+    const allowed = isCreativity ? CREATIVITY_DURATIONS : SHORT_DURATIONS;
+    duration_seconds = allowed.has(durationRaw) ? durationRaw : 30;
   }
 
   const aspect = String(body.aspect_ratio || "9:16").trim();

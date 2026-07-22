@@ -509,6 +509,11 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
     motion = str(meta0.get("motion") or "none").strip()
     intro_fade = str(meta0.get("intro_fade") or "none").strip()
     outro_fade = str(meta0.get("outro_fade") or "none").strip()
+    overlay_text = str(meta0.get("overlay_text") or "").strip()
+    caption_text = str(meta0.get("caption_text") or "").strip()
+    text_style = str(meta0.get("text_style") or "bold_center").strip()
+    subtitle_style = str(meta0.get("subtitle_style") or "classic").strip()
+    preferred_transition = str(meta0.get("preferred_transition") or "fade").strip()
     music_mode = str(meta0.get("music_mode") or "none").strip()
     music_track_id = str(meta0.get("music_track_id") or "").strip() or None
     try:
@@ -519,7 +524,7 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
 
     print(
         f"[REEDIT] job={job_id} effect={effect} motion={motion} "
-        f"music={music_mode} keep_audio={keep_original}"
+        f"transition={preferred_transition} music={music_mode} keep_audio={keep_original}"
     )
 
     db.update_job(sb, job_id, status="editing", metadata={**meta0})
@@ -536,6 +541,26 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
         intro_fade=intro_fade,
         outro_fade=outro_fade,
     )
+
+    if overlay_text:
+        from orzuvideo.pipeline.montage import burn_text_overlay
+
+        titled = work / "titled.mp4"
+        burn_text_overlay(looked, titled, overlay_text, style_id=text_style)
+        looked = titled
+
+    if caption_text:
+        from orzuvideo.pipeline.montage import burn_caption_overlay
+
+        capped = work / "captioned.mp4"
+        burn_caption_overlay(
+            looked,
+            capped,
+            caption_text,
+            style_id=subtitle_style,
+            work_dir=work,
+        )
+        looked = capped
 
     clip_len = ffprobe_duration(looked)
     voice_a = work / "voice.aac"
@@ -679,7 +704,8 @@ def process_job(job: dict) -> None:
             fixed_dur = None
             if not duration_auto and meta0.get("duration_seconds") is not None:
                 try:
-                    fixed_dur = max(15, min(60, int(meta0["duration_seconds"])))
+                    # Personal creativity videos: up to 5 minutes
+                    fixed_dur = max(15, min(300, int(meta0["duration_seconds"])))
                 except (TypeError, ValueError):
                     duration_auto = True
                     fixed_dur = None
@@ -855,12 +881,16 @@ def process_job(job: dict) -> None:
         }
         if script_data.get("duration_seconds") is not None:
             try:
-                fmt = str(
-                    (training or {}).get("video_format")
-                    or meta0.get("video_format")
-                    or "shorts"
-                )
-                chosen = _clamp_duration(int(script_data["duration_seconds"]), fmt)
+                raw_dur = int(script_data["duration_seconds"])
+                if is_creativity:
+                    chosen = max(15, min(300, raw_dur))
+                else:
+                    fmt = str(
+                        (training or {}).get("video_format")
+                        or meta0.get("video_format")
+                        or "shorts"
+                    )
+                    chosen = _clamp_duration(raw_dur, fmt)
                 script_update["duration_seconds"] = chosen
                 script_update["metadata"] = {
                     **script_update["metadata"],

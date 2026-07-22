@@ -1,5 +1,6 @@
-import { MusicLibraryStudio } from "@/components/MusicLibraryStudio";
+import { redirect } from "next/navigation";
 
+/** Music library moved to the separate admin project. */
 export default function MusicLibraryPage() {
-  return <MusicLibraryStudio />;
+  redirect("/dashboard/content");
 }

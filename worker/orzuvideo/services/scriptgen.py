@@ -236,14 +236,17 @@ def generate_creativity_script(
 
     client = OpenAI(api_key=settings.openai_api_key)
 
+    # Creativity allows longer personal videos (up to 5 minutes).
+    creat_min, creat_max = 15, 300
     if duration_auto or not duration_seconds:
         duration_rule = (
-            "- Choose ideal spoken duration yourself between 15 and 60 seconds "
-            "based on the prompt complexity. Put it in duration_seconds."
+            f"- Choose ideal spoken duration yourself between {creat_min} and {creat_max} seconds "
+            "based on the prompt complexity (shorts ~30–60s, stories/explainers up to a few minutes). "
+            "Put it in duration_seconds."
         )
-        target_note = "Pick the best duration (15–60s) for this idea."
+        target_note = f"Pick the best duration ({creat_min}–{creat_max}s) for this idea."
     else:
-        dur = max(15, min(60, int(duration_seconds)))
+        dur = max(creat_min, min(creat_max, int(duration_seconds)))
         words = max(40, int(dur * 2.4))
         duration_rule = (
             f"- Spoken duration target: {dur} seconds (about {words} words). "
@@ -313,7 +316,9 @@ Hard requirements:
     }
     if data.get("duration_seconds") is not None:
         try:
-            result["duration_seconds"] = max(15, min(60, int(data["duration_seconds"])))
+            result["duration_seconds"] = max(
+                creat_min, min(creat_max, int(data["duration_seconds"]))
+            )
         except (TypeError, ValueError):
             pass
     return result

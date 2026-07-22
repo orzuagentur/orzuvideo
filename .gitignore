@@ -17,5 +17,6 @@ worker/**/temp/
 .DS_Store
 .vercel
 *.log
+admin/.admin-password.txt
 
 .vercel
