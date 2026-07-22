@@ -32,6 +32,59 @@ type YtThreadItem = {
   };
 };
 
+async function fetchAllReplies(
+  accessToken: string,
+  parentId: string,
+): Promise<
+  Array<{
+    id: string;
+    author: string;
+    text: string;
+    authorChannelId: string | null;
+    publishedAt: string | null;
+    likeCount: number;
+  }>
+> {
+  const out: Array<{
+    id: string;
+    author: string;
+    text: string;
+    authorChannelId: string | null;
+    publishedAt: string | null;
+    likeCount: number;
+  }> = [];
+  let pageToken = "";
+  for (let page = 0; page < 8; page += 1) {
+    const params = new URLSearchParams({
+      part: "snippet",
+      parentId,
+      maxResults: "100",
+      textFormat: "plainText",
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/comments?${params}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    const data = await res.json();
+    if (!res.ok) break;
+    for (const item of data.items || []) {
+      const s = item.snippet || {};
+      out.push({
+        id: String(item.id || ""),
+        author: s.authorDisplayName || "Viewer",
+        text: s.textDisplay || s.textOriginal || "",
+        authorChannelId: s.authorChannelId?.value || null,
+        publishedAt: s.publishedAt || null,
+        likeCount: Number(s.likeCount || 0),
+      });
+    }
+    pageToken = data.nextPageToken || "";
+    if (!pageToken) break;
+  }
+  return out;
+}
+
 async function generateAiReply(params: {
   commentText: string;
   author: string;
@@ -149,41 +202,54 @@ export async function GET(request: Request) {
       }
     }
 
-    const comments = items.map((item) => {
-      const top = item.snippet?.topLevelComment;
-      const s = top?.snippet;
-      const commentId = top?.id || item.id;
-      const nest = (item.replies?.comments || []).map((r) => ({
-        id: r.id || "",
-        author: r.snippet?.authorDisplayName || "Viewer",
-        text: r.snippet?.textDisplay || "",
-        authorChannelId: r.snippet?.authorChannelId?.value || null,
-        publishedAt: r.snippet?.publishedAt || null,
-      }));
-      const ours = nest.some(
-        (r) => ownChannelId && r.authorChannelId === ownChannelId,
-      );
-      const tracked = repliedMap.get(commentId);
-      return {
-        id: item.id,
-        commentId,
-        author: s?.authorDisplayName || "Viewer",
-        authorChannelId: s?.authorChannelId?.value || null,
-        avatar: s?.authorProfileImageUrl || null,
-        text: s?.textDisplay || "",
-        likes: s?.likeCount || 0,
-        publishedAt: s?.publishedAt || null,
-        replyCount: item.snippet?.totalReplyCount || 0,
-        replies: nest,
-        ourReply:
-          tracked?.status === "replied"
-            ? tracked.reply_text
-            : ours
-              ? nest.find((r) => r.authorChannelId === ownChannelId)?.text || null
-              : null,
-        repliedByUs: Boolean(ours || tracked?.status === "replied"),
-      };
-    });
+    const comments = await Promise.all(
+      items.map(async (item) => {
+        const top = item.snippet?.topLevelComment;
+        const s = top?.snippet;
+        const commentId = top?.id || item.id;
+        const totalReplies = Number(item.snippet?.totalReplyCount || 0);
+        let nest = (item.replies?.comments || []).map((r) => ({
+          id: r.id || "",
+          author: r.snippet?.authorDisplayName || "Viewer",
+          text: r.snippet?.textDisplay || "",
+          authorChannelId: r.snippet?.authorChannelId?.value || null,
+          publishedAt: r.snippet?.publishedAt || null,
+          likeCount: 0,
+        }));
+        // commentThreads only embeds a few replies — fetch the full thread
+        if (commentId && totalReplies > nest.length) {
+          try {
+            nest = await fetchAllReplies(accessToken, commentId);
+          } catch {
+            /* keep partial nest */
+          }
+        }
+        const ours = nest.some(
+          (r) => ownChannelId && r.authorChannelId === ownChannelId,
+        );
+        const tracked = repliedMap.get(commentId);
+        return {
+          id: item.id,
+          commentId,
+          author: s?.authorDisplayName || "Viewer",
+          authorChannelId: s?.authorChannelId?.value || null,
+          avatar: s?.authorProfileImageUrl || null,
+          text: s?.textDisplay || "",
+          likes: s?.likeCount || 0,
+          publishedAt: s?.publishedAt || null,
+          replyCount: totalReplies || nest.length,
+          replies: nest,
+          ourReply:
+            tracked?.status === "replied"
+              ? tracked.reply_text
+              : ours
+                ? nest.find((r) => r.authorChannelId === ownChannelId)?.text ||
+                  null
+                : null,
+          repliedByUs: Boolean(ours || tracked?.status === "replied"),
+        };
+      }),
+    );
 
     return NextResponse.json({
       comments,

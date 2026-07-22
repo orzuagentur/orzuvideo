@@ -2,24 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from orzuvideo.config import settings
+from orzuvideo.pipeline.fx_library import (
+    EFFECT_FILTERS,
+    FADE_BOOKENDS,
+    MOTION_PRESETS,
+    effect_chain,
+    motion_by_id,
+)
 from orzuvideo.pipeline.media import (
     ffprobe_duration,
     has_audio_stream,
     make_silent_audio,
     run_ffmpeg,
 )
-from orzuvideo.pipeline.montage import MOTION_PRESETS
 
-EFFECT_FILTERS: dict[str, str] = {
-    "none": "",
-    "cinematic": "eq=contrast=1.08:saturation=1.12:brightness=0.02,vignette=PI/5.5",
-    "vivid": "eq=contrast=1.14:saturation=1.28:brightness=0.03",
-    "soft": "eq=contrast=0.96:saturation=0.92:brightness=0.04:gamma=1.05",
-    "noir": "hue=s=0,eq=contrast=1.2:brightness=-0.02",
-    "punch": "eq=contrast=1.18:saturation=1.22:brightness=0.05",
-    "vignette": "vignette=PI/4.5,eq=contrast=1.06:saturation=1.08",
-}
-
+# Back-compat aliases
 MOTION_BY_ID = {m["id"]: m for m in MOTION_PRESETS}
 
 
@@ -38,6 +36,7 @@ def trim_clip(
     else:
         length = max(0.5, dur - ss)
 
+    fps = settings.fps
     args = [
         "-ss",
         f"{ss:.3f}",
@@ -45,6 +44,14 @@ def trim_clip(
         str(source),
         "-t",
         f"{length:.3f}",
+        "-vf",
+        f"fps={fps},format=yuv420p,settb=1/{fps},setpts=PTS-STARTPTS",
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-video_track_timescale",
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -75,21 +82,27 @@ def apply_look(
     """Apply grade / optional Ken Burns / bookend fades in one encode."""
     out.parent.mkdir(parents=True, exist_ok=True)
     dur = ffprobe_duration(source)
+    fps = settings.fps
+    w, h = settings.output_width, settings.output_height
     parts: list[str] = []
 
-    motion_p = MOTION_BY_ID.get(motion) if motion and motion != "none" else None
+    motion_p = motion_by_id(motion) if motion and motion != "none" else None
     if motion_p:
         parts.append(
-            "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
+            f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
         )
         parts.append(
             f"zoompan=z='{motion_p['zoom']}':x='{motion_p['x']}':y='{motion_p['y']}'"
-            f":d=1:s=1080x1920:fps=30"
+            f":d=1:s={w}x{h}:fps={fps}"
         )
         if motion_p.get("eq"):
             parts.append(motion_p["eq"])
+        # Layer selected grade on top of motion grade when both set
+        ef = effect_chain(effect)
+        if ef and effect not in ("none", ""):
+            parts.append(ef)
     else:
-        ef = EFFECT_FILTERS.get(effect or "none", "")
+        ef = effect_chain(effect)
         if ef:
             parts.append(ef)
 
@@ -103,26 +116,7 @@ def apply_look(
         color = "white" if outro_fade == "fadewhite" else "black"
         parts.append(f"fade=t=out:st={st:.3f}:d={fade_out:.2f}:color={color}")
 
-    if not parts:
-        args = [
-            "-i",
-            str(source),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-        ]
-        if has_audio_stream(source):
-            args.extend(["-c:a", "aac", "-b:a", "192k"])
-        else:
-            args.append("-an")
-        args.extend(["-movflags", "+faststart", str(out)])
-        run_ffmpeg(args)
-        return out
+    parts.append(f"fps={fps},format=yuv420p,settb=1/{fps},setpts=PTS-STARTPTS")
 
     vf = ",".join(parts)
     args = [
@@ -138,6 +132,12 @@ def apply_look(
         "19",
         "-pix_fmt",
         "yuv420p",
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-video_track_timescale",
+        str(fps),
     ]
     if has_audio_stream(source):
         args.extend(["-c:a", "aac", "-b:a", "192k"])
@@ -192,3 +192,9 @@ def mux_av(video: Path, audio: Path, out: Path) -> Path:
         ]
     )
     return out
+
+
+# Keep for API validation / docs
+KNOWN_EFFECTS = set(EFFECT_FILTERS.keys())
+KNOWN_MOTIONS = {"none", *[m["id"] for m in MOTION_PRESETS]}
+KNOWN_FADES = set(FADE_BOOKENDS)

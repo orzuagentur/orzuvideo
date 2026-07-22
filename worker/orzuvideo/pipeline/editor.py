@@ -97,22 +97,24 @@ def burn_subtitles_and_mux(
     hook_text: str | None = None,
     work_dir: Path,
     size: tuple[int, int] | None = None,
+    style_id: str = "classic",
+    visual_effect: str | None = None,
 ) -> Path:
+    from orzuvideo.pipeline.fx_library import effect_chain
+
     ass = write_ass_subtitles(
         words,
         work_dir / "subs.ass",
         emphasis=emphasis,
         hook_text=hook_text,
         play_res=size,
+        style_id=style_id or "classic",
     )
     ass_esc = _escape_ass_path(ass)
 
-    # Subtle film grade + vignette after captions
-    vf = (
-        f"ass='{ass_esc}',"
-        "vignette=PI/5.5,"
-        "eq=contrast=1.05:saturation=1.06:gamma=0.98"
-    )
+    grade = effect_chain(visual_effect) if visual_effect else ""
+    grade_part = f",{grade}" if grade else ",vignette=PI/5.5,eq=contrast=1.05:saturation=1.06:gamma=0.98"
+    vf = f"ass='{ass_esc}'{grade_part}"
 
     duration = ffprobe_duration(audio)
     run_ffmpeg(
@@ -160,6 +162,8 @@ def build_short(
     music_volume_body: float = 0.58,
     voice_volume: float = 1.05,
     size: tuple[int, int] | None = None,
+    subtitle_style: str = "classic",
+    visual_effect: str | None = None,
 ) -> Path:
     """Pro Shorts assembly: punch open, motion library, cinematic transitions."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -188,7 +192,15 @@ def build_short(
                 tries += 1
             used_motions.add(motion["id"])
         print(f"Clip {i} motion: {motion['id']} ({dur:.2f}s)")
-        normalize_clip_pro(clip, dst, dur, punch=punch, motion=motion, size=frame)
+        normalize_clip_pro(
+            clip,
+            dst,
+            dur,
+            punch=punch,
+            motion=motion,
+            size=frame,
+            effect=visual_effect if visual_effect and visual_effect != "none" else None,
+        )
         normalized.append(dst)
 
     timeline = work_dir / "timeline.mp4"
@@ -236,4 +248,6 @@ def build_short(
         hook_text=hook_text,
         work_dir=work_dir,
         size=frame,
+        style_id=subtitle_style or "classic",
+        visual_effect=None,  # already graded on clips; avoid double grade
     )

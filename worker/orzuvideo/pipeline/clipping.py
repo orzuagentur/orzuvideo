@@ -206,8 +206,14 @@ def reframe_clip(
     height: int,
     effects: bool,
 ) -> Path:
-    """Center-crop / pad to target aspect with optional grade + fades."""
+    """Center-crop / pad to target aspect with optional grade + locked CFR timebase."""
+    from orzuvideo.config import settings
+    from orzuvideo.pipeline.fx_library import EFFECT_FILTERS
+    import random
+
     out.parent.mkdir(parents=True, exist_ok=True)
+    fps = settings.fps
+    tb = f"fps={fps},format=yuv420p,settb=1/{fps},setpts=PTS-STARTPTS"
     base = (
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
         f"crop={width}:{height}"
@@ -216,23 +222,35 @@ def reframe_clip(
         try:
             dur = ffprobe_duration(source)
             fade_out = max(0.2, dur - 0.4)
+            grades = [
+                v
+                for k, v in EFFECT_FILTERS.items()
+                if k not in ("none",) and v
+            ]
+            grade = random.choice(grades) if grades else "eq=contrast=1.08:saturation=1.12"
             vf = (
                 f"{base},"
-                "eq=contrast=1.08:saturation=1.12:brightness=0.02,"
-                "vignette=PI/5,"
+                f"{grade},"
                 "fade=t=in:st=0:d=0.2,"
-                f"fade=t=out:st={fade_out:.3f}:d=0.35"
+                f"fade=t=out:st={fade_out:.3f}:d=0.35,"
+                f"{tb}"
             )
         except Exception:
-            vf = f"{base},eq=contrast=1.06:saturation=1.08"
+            vf = f"{base},eq=contrast=1.06:saturation=1.08,{tb}"
     else:
-        vf = base
+        vf = f"{base},{tb}"
 
     args = [
         "-i",
         str(source),
         "-vf",
         vf,
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-video_track_timescale",
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -261,6 +279,12 @@ def reframe_clip(
         "0:v:0",
         "-map",
         "1:a:0",
+        "-r",
+        str(fps),
+        "-vsync",
+        "cfr",
+        "-video_track_timescale",
+        str(fps),
         "-c:v",
         "libx264",
         "-preset",
@@ -445,44 +469,63 @@ def concat_av_clips(
         )
         return out
 
-    # Video xfade + audio acrossfade
+    # Video xfade + audio acrossfade — lock fps/timebase on every stream first
+    from orzuvideo.config import settings
+    from orzuvideo.pipeline.montage import _relock_label, _tb_chain
+
+    fps = settings.fps
+    w, h = settings.output_width, settings.output_height
     durations = [ffprobe_duration(c) for c in clips]
     overlap = 0.45
     inputs: list[str] = []
     for c in clips:
         inputs.extend(["-i", str(c)])
 
+    prep: list[str] = []
+    for i in range(len(clips)):
+        prep.append(
+            f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},{_tb_chain(fps=fps)}[pv{i}]"
+        )
+        prep.append(
+            f"[{i}:a]aformat=sample_rates=44100:channel_layouts=stereo,"
+            f"asetpts=PTS-STARTPTS[pa{i}]"
+        )
+
     v_filters: list[str] = []
     a_filters: list[str] = []
     offset = max(0.05, durations[0] - overlap)
-    prev_v = "[0:v]"
-    prev_a = "[0:a]"
+    prev_v = "[pv0]"
+    prev_a = "[pa0]"
     last_tr: str | None = None
 
     for i in range(1, len(clips)):
         tr = pick_transition(exclude=last_tr)
         last_tr = tr
         dur = min(overlap, 0.6)
-        v_out = f"[v{i}]" if i < len(clips) - 1 else "[vout]"
+        raw_v = f"[vx{i}]"
         a_out = f"[a{i}]" if i < len(clips) - 1 else "[aout]"
         v_filters.append(
-            f"{prev_v}[{i}:v]xfade=transition={tr}:duration={dur:.3f}:offset={offset:.3f}{v_out}"
+            f"{prev_v}[pv{i}]xfade=transition={tr}:duration={dur:.3f}:offset={offset:.3f}{raw_v}"
         )
-        a_filters.append(
-            f"{prev_a}[{i}:a]acrossfade=d={dur:.3f}:c1=tri:c2=tri{a_out}"
-        )
-        prev_v = v_out
-        prev_a = a_out
         if i < len(clips) - 1:
+            locked = f"[pv{i}x]"
+            v_filters.append(_relock_label(raw_v, fps=fps, out=locked))
+            prev_v = locked
             offset += durations[i] - dur
+        else:
+            v_filters.append(_relock_label(raw_v, fps=fps, out="[vout]"))
+        a_filters.append(
+            f"{prev_a}[pa{i}]acrossfade=d={dur:.3f}:c1=tri:c2=tri{a_out}"
+        )
+        prev_a = a_out
 
-    # Fallback if audio missing on some clips: video-only then silent
     try:
         run_ffmpeg(
             [
                 *inputs,
                 "-filter_complex",
-                ";".join(v_filters + a_filters),
+                ";".join(prep + v_filters + a_filters),
                 "-map",
                 "[vout]",
                 "-map",
@@ -495,6 +538,12 @@ def concat_av_clips(
                 "19",
                 "-pix_fmt",
                 "yuv420p",
+                "-r",
+                str(fps),
+                "-vsync",
+                "cfr",
+                "-video_track_timescale",
+                str(max(fps * 1000, 30000)),
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -508,7 +557,6 @@ def concat_av_clips(
         print(f"[CLIPPING] AV xfade failed ({exc}); video-only concat")
         vid_only = work_dir / "vout_only.mp4"
         concat_with_pro_transitions(clips, vid_only, overlap=overlap)
-        # mix first clip audio loop length
         audio = work_dir / "a0.aac"
         extract_clip_audio(clips[0], audio)
         mux_video_audio(vid_only, audio, out)

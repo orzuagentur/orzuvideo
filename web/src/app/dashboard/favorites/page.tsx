@@ -1,5 +1,5 @@
-import { FavoritesStudio } from "@/components/FavoritesStudio";
+import { LibraryStudio } from "@/components/LibraryStudio";
 
-export default function FavoritesPage() {
-  return <FavoritesStudio />;
+export default function LibraryPage() {
+  return <LibraryStudio />;
 }

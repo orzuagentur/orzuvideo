@@ -4,8 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 
 /**
- * Media library for AI Clipping — same Pexels videos as the Media page,
- * loaded only through our /api/media/search proxy.
+ * Media library for AI Clipping — stock videos via our search proxy.
  * ?q=  &page=  &orientation=
  */
 export async function GET(request: Request) {
@@ -57,20 +56,22 @@ export async function GET(request: Request) {
         height?: number | null;
       }) => {
         const thumbProxy = it.thumb
-          ? `/api/media/download?inline=1&type=photo&url=${encodeURIComponent(it.thumb)}&filename=${encodeURIComponent(`pexels-${it.id}.jpg`)}`
+          ? `/api/media/download?inline=1&type=photo&url=${encodeURIComponent(it.thumb)}&filename=${encodeURIComponent(`stock-${it.id}.jpg`)}`
           : null;
         const previewProxy = it.previewUrl
-          ? `/api/media/download?inline=1&type=video&url=${encodeURIComponent(it.previewUrl)}&filename=${encodeURIComponent(`pexels-${it.id}.mp4`)}`
+          ? `/api/media/download?inline=1&type=video&url=${encodeURIComponent(it.previewUrl)}&filename=${encodeURIComponent(`stock-${it.id}.mp4`)}`
           : null;
+        const downloadProxy = it.downloadUrl
+          ? `/api/media/download?type=video&url=${encodeURIComponent(it.downloadUrl)}&filename=${encodeURIComponent(`stock-${it.id}.mp4`)}`
+          : previewProxy;
         return {
           id: String(it.id),
           title: it.title || `Video #${it.id}`,
-          author: it.author || "",
+          author: it.author || "Stock",
           kind: "media" as const,
-          provider: "pexels",
           media_url: previewProxy,
           thumb_url: thumbProxy,
-          download_url: it.downloadUrl || it.previewUrl || null,
+          download_url: downloadProxy,
           duration_seconds: it.durationSec ?? null,
           width: it.width ?? null,
           height: it.height ?? null,
@@ -83,6 +84,5 @@ export async function GET(request: Request) {
     page: data.page ?? page,
     hasMore: Boolean(data.hasMore),
     total: data.total ?? items.length,
-    provider: "pexels",
   });
 }

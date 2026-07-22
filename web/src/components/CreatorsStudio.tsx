@@ -1,6 +1,5 @@
 "use client";
 
-import { YouTubeChannelsButton } from "@/components/AppShell";
 import {
   useCallback,
   useEffect,
@@ -80,6 +79,7 @@ export function CreatorsStudio() {
   const [viewer, setViewer] = useState<PolyHavenAssetMeta | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [hoverCat, setHoverCat] = useState<string | null>(null);
+  const [favKeys, setFavKeys] = useState<Set<string>>(() => new Set());
 
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const typeRef = useRef<HTMLDivElement | null>(null);
@@ -100,6 +100,21 @@ export function CreatorsStudio() {
     }
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch("/api/favorites?kind=photo");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const keys = new Set<string>();
+      for (const it of data.items || []) {
+        if (String(it.asset_id || "").startsWith("creator:")) {
+          keys.add(String(it.asset_id));
+        }
+      }
+      setFavKeys(keys);
+    })();
   }, []);
 
   // Load all categories for current type
@@ -272,18 +287,48 @@ export function CreatorsStudio() {
     }
   }
 
+  async function toggleFavorite(asset: PolyHavenAssetMeta) {
+    const asset_id = `creator:${asset.id}`;
+    const active = favKeys.has(asset_id);
+    if (active) {
+      const res = await fetch(
+        `/api/favorites?kind=photo&asset_id=${encodeURIComponent(asset_id)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok) return;
+      setFavKeys((prev) => {
+        const next = new Set(prev);
+        next.delete(asset_id);
+        return next;
+      });
+      return;
+    }
+    const res = await fetch("/api/favorites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "photo",
+        asset_id,
+        title: asset.name,
+        author: asset.authors[0] || null,
+        thumb: asset.primaryUrl,
+        preview_url: asset.primaryUrl,
+      }),
+    });
+    if (!res.ok) return;
+    setFavKeys((prev) => new Set(prev).add(asset_id));
+  }
+
   const activeCategoryLabel =
     categories.find((c) => c.id === category)?.label || category;
 
   return (
     <div className="space-y-4">
-      {/* Sticky toolbar — YouTube + search always (like Media) */}
+      {/* Sticky toolbar — search */}
       <form
         onSubmit={onSearch}
         className="sticky top-[5.75rem] z-40 -mx-4 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-4 py-3 backdrop-blur-md md:top-[6.25rem] md:-mx-6 md:px-6"
       >
-        <YouTubeChannelsButton />
-
         <div className="relative min-w-0 flex-1">
           <div className="absolute left-1.5 top-1/2 z-10 -translate-y-1/2" ref={typeRef}>
             <button
@@ -442,33 +487,62 @@ export function CreatorsStudio() {
             <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5">
               {items.map((asset) => {
                 const hover = hoverId === asset.id;
+                const favId = `creator:${asset.id}`;
+                const liked = favKeys.has(favId);
                 return (
-                  <button
+                  <div
                     key={asset.id}
-                    type="button"
-                    onClick={() => setViewer(asset)}
+                    className="relative aspect-square overflow-hidden bg-transparent"
                     onMouseEnter={() => setHoverId(asset.id)}
                     onMouseLeave={() => setHoverId(null)}
-                    className="relative aspect-square overflow-hidden bg-transparent outline-none"
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={asset.primaryUrl}
-                      alt={asset.name}
-                      loading="lazy"
-                      className="h-full w-full object-contain transition duration-300"
-                      style={{
-                        transform: hover ? "scale(1.04)" : "scale(1)",
-                        filter: hover ? "brightness(1.05)" : undefined,
+                    <button
+                      type="button"
+                      onClick={() => setViewer(asset)}
+                      className="absolute inset-0 outline-none"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={asset.primaryUrl}
+                        alt={asset.name}
+                        loading="lazy"
+                        className="h-full w-full object-contain transition duration-300"
+                        style={{
+                          transform: hover ? "scale(1.04)" : "scale(1)",
+                          filter: hover ? "brightness(1.05)" : undefined,
+                        }}
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute left-2 top-2 z-[2] flex h-8 w-8 items-center justify-center rounded-full bg-black/55 transition hover:bg-black/75"
+                      aria-label={liked ? "Remove from favorites" : "Add to favorites"}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void toggleFavorite(asset);
                       }}
-                    />
+                      style={{ color: liked ? "#ff4d6d" : "#fff" }}
+                    >
+                      <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill={liked ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        aria-hidden
+                      >
+                        <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" />
+                      </svg>
+                    </button>
                     {hover && (
                       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-3 text-left">
                         <p className="truncate text-sm font-semibold text-white">
                           {asset.name}
                         </p>
                         <p className="truncate text-[11px] text-white/75">
-                          {asset.authors[0] || "Poly Haven"}
+                          {asset.authors[0] || "Creator asset"}
                           {asset.polycount
                             ? ` · ${asset.polycount.toLocaleString()} tris`
                             : ""}
@@ -480,7 +554,7 @@ export function CreatorsStudio() {
                         ) : null}
                       </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -845,15 +919,6 @@ function AssetFullscreen({
                   ? `Download · ${formatBytes(selectedPack.totalSize)}`
                   : "Download"}
             </button>
-
-            <a
-              href={asset.pageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex text-xs text-[color:var(--accent)] underline-offset-2 hover:underline"
-            >
-              polyhaven.com →
-            </a>
           </div>
         </aside>
       </div>

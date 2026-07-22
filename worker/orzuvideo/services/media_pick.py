@@ -24,8 +24,7 @@ class LibraryTrack:
     genre: str = ""
 
 
-# Back-compat alias for runners that expect JamendoTrack shape
-JamendoTrack = LibraryTrack
+# LibraryTrack is the only music shape — Jamendo removed
 
 
 def attribution_line(track: LibraryTrack | None) -> str:

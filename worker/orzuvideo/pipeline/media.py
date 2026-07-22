@@ -203,13 +203,22 @@ def write_ass_subtitles(
     emphasis: list[str] | None = None,
     hook_text: str | None = None,
     play_res: tuple[int, int] | None = None,
+    style_id: str = "classic",
 ) -> Path:
-    """Professional karaoke ASS + optional 3-second hook headline."""
+    """Professional karaoke ASS + optional hook; CapCut-like subtitle styles."""
+    from orzuvideo.pipeline.fx_library import SUBTITLE_STYLES
+
     emphasis_set = {e.upper().strip(".,!") for e in (emphasis or [])}
     play_w, play_h = play_res or (1080, 1920)
-    # Keep captions in the lower third relative to frame height
     margin_v = max(80, int(play_h * 0.27))
     hook_margin_v = max(120, int(play_h * 0.4))
+    st = SUBTITLE_STYLES.get(style_id) or SUBTITLE_STYLES["classic"]
+    gold = SUBTITLE_STYLES.get("karaoke_gold") or st
+    hook = SUBTITLE_STYLES.get("hook_banner") or st
+    border_style = st.get("border_style", "1")
+    back = st.get("back", "&H80000000")
+    align = st.get("align", "2")
+
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {play_w}
@@ -219,9 +228,9 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,78,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,0,2,60,60,{margin_v},1
-Style: Emphasis,Arial Black,86,&H0000E5FF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,0,2,60,60,{margin_v},1
-Style: Hook,Arial Black,92,&H0000E5FF,&H000000FF,&H00000000,&HA0000000,-1,0,0,0,100,100,0,0,1,8,0,2,50,50,{hook_margin_v},1
+Style: Default,{st['font']},{st['size']},{st['primary']},&H000000FF,{st['outline']},{back},{st['bold']},0,0,0,100,100,0,0,{border_style},{st['outline_w']},{st['shadow']},{align},60,60,{margin_v},1
+Style: Emphasis,{gold['font']},{gold['size']},{gold['primary']},&H000000FF,{gold['outline']},&H80000000,{gold['bold']},0,0,0,100,100,0,0,1,{gold['outline_w']},0,2,60,60,{margin_v},1
+Style: Hook,{hook['font']},{hook['size']},{hook['primary']},&H000000FF,{hook['outline']},&HA0000000,{hook['bold']},0,0,0,100,100,0,0,1,{hook['outline_w']},0,2,50,50,{hook_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -240,14 +249,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     lines = [header]
 
-    # Giant hook text for first 3 seconds (pattern interrupt)
     if hook_text:
         clean_hook = re.sub(r"\s+", " ", hook_text).strip()[:72]
         lines.append(
             f"Dialogue: 1,{ts(0.05)},{ts(2.95)},Hook,,0,0,0,,{{\\fad(120,180)\\fscx108\\fscy108}}{clean_hook}\n"
         )
 
-    # Group into chunks of 3–4 words for readability
     i = 0
     while i < len(words):
         chunk = words[i : i + 3]

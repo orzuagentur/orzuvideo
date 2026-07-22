@@ -2,38 +2,35 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import type { VideoJob } from "@/lib/types";
 import { useToast } from "@/components/ToastNotice";
+import {
+  EFFECTS,
+  FADES,
+  MOTIONS,
+  SUBTITLE_STYLES,
+  TEXT_STYLES,
+  TRANSITIONS,
+} from "@/lib/editor-catalog";
 
-const EFFECTS = [
-  { id: "none", label: "None", css: "none" },
-  { id: "cinematic", label: "Cinematic", css: "contrast(1.08) saturate(1.12) brightness(1.02)" },
-  { id: "vivid", label: "Vivid", css: "contrast(1.14) saturate(1.28) brightness(1.03)" },
-  { id: "soft", label: "Soft", css: "contrast(0.96) saturate(0.92) brightness(1.04)" },
-  { id: "noir", label: "Noir", css: "grayscale(1) contrast(1.2)" },
-  { id: "punch", label: "Punch", css: "contrast(1.18) saturate(1.22) brightness(1.05)" },
-  { id: "vignette", label: "Vignette", css: "contrast(1.06) saturate(1.08)" },
-] as const;
-
-const MOTIONS = [
-  { id: "none", label: "None" },
-  { id: "slow_push", label: "Slow push" },
-  { id: "punch_in", label: "Punch in" },
-  { id: "rise", label: "Rise" },
-  { id: "drift_left", label: "Drift left" },
-  { id: "drift_right", label: "Drift right" },
-  { id: "snap_zoom", label: "Snap zoom" },
-] as const;
-
-const FADES = [
-  { id: "none", label: "None" },
-  { id: "fade", label: "Fade" },
-  { id: "fadeblack", label: "Fade black" },
-  { id: "fadewhite", label: "Fade white" },
-] as const;
-
-type Panel = "effects" | "motion" | "fades" | "music" | "audio";
+type Category =
+  | "trim"
+  | "filters"
+  | "motion"
+  | "inout"
+  | "transition"
+  | "text"
+  | "captions"
+  | "music"
+  | "sound";
 
 type MusicTrack = {
   id: string;
@@ -41,6 +38,20 @@ type MusicTrack = {
   author: string;
   previewUrl: string | null;
 };
+
+const ACCENT = "#E8A54B";
+
+const CATEGORIES: { id: Category; label: string }[] = [
+  { id: "trim", label: "Trim" },
+  { id: "filters", label: "Filters" },
+  { id: "motion", label: "Motion" },
+  { id: "inout", label: "In/Out" },
+  { id: "transition", label: "Transition" },
+  { id: "text", label: "Text" },
+  { id: "captions", label: "Captions" },
+  { id: "music", label: "Music" },
+  { id: "sound", label: "Sound" },
+];
 
 function formatTime(sec: number) {
   if (!Number.isFinite(sec) || sec < 0) return "0:00";
@@ -66,17 +77,172 @@ function parentReturnPath(job: VideoJob): string {
   return "/dashboard/content";
 }
 
+function overlayTextClass(style: (typeof TEXT_STYLES)[number]["id"]) {
+  switch (style) {
+    case "hook_top":
+      return "absolute inset-x-3 top-[14%] text-center";
+    case "caption_bottom":
+      return "absolute inset-x-3 bottom-[22%] text-center";
+    case "box_lower":
+      return "absolute inset-x-3 bottom-[18%] text-center";
+    case "tiny_credit":
+      return "absolute inset-x-3 bottom-[6%] text-center";
+    case "mega_title":
+      return "absolute inset-x-2 top-1/2 -translate-y-1/2 text-center";
+    default:
+      return "absolute inset-x-3 top-1/2 -translate-y-1/2 text-center";
+  }
+}
+
+function overlayTextStyle(style: (typeof TEXT_STYLES)[number]["id"]): CSSProperties {
+  const base: CSSProperties = {
+    fontWeight: 800,
+    textShadow: "0 2px 8px rgba(0,0,0,0.85)",
+  };
+  switch (style) {
+    case "hook_top":
+      return { ...base, color: ACCENT, fontSize: "1rem" };
+    case "caption_bottom":
+      return { ...base, color: "#fff", fontSize: "0.85rem" };
+    case "box_lower":
+      return {
+        ...base,
+        color: "#fff",
+        fontSize: "0.8rem",
+        background: "rgba(0,0,0,0.55)",
+        borderRadius: 8,
+        padding: "6px 10px",
+        display: "inline-block",
+      };
+    case "tiny_credit":
+      return { ...base, color: "rgba(255,255,255,0.75)", fontSize: "0.65rem", fontWeight: 600 };
+    case "mega_title":
+      return { ...base, color: "#fff", fontSize: "1.35rem", letterSpacing: "-0.02em" };
+    default:
+      return { ...base, color: "#fff", fontSize: "1.05rem" };
+  }
+}
+
+function captionPreviewStyle(
+  style: (typeof SUBTITLE_STYLES)[number]["id"],
+): CSSProperties {
+  const base: CSSProperties = {
+    fontWeight: 800,
+    fontSize: "0.82rem",
+    lineHeight: 1.25,
+    textAlign: "center",
+  };
+  switch (style) {
+    case "karaoke_gold":
+      return { ...base, color: "#FFD700", textShadow: "0 0 12px rgba(255,215,0,0.5), 0 2px 4px #000" };
+    case "box_white":
+      return {
+        ...base,
+        color: "#fff",
+        background: "rgba(0,0,0,0.6)",
+        borderRadius: 6,
+        padding: "4px 10px",
+        display: "inline-block",
+      };
+    case "neon_pink":
+      return { ...base, color: "#FF66FF", textShadow: "0 0 10px #FF00AA, 0 2px 4px #000" };
+    case "minimal":
+      return { ...base, color: "#f0f0f0", fontWeight: 500, textShadow: "0 1px 3px rgba(0,0,0,0.6)" };
+    case "impact":
+      return { ...base, fontSize: "0.95rem", color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000" };
+    case "soft_shadow":
+      return { ...base, color: "#fff", textShadow: "0 3px 8px rgba(0,0,0,0.9)" };
+    case "yellow_pop":
+      return { ...base, color: "#FFFF00", textShadow: "0 2px 4px #000" };
+    case "lower_third":
+      return {
+        ...base,
+        color: "#fff",
+        fontSize: "0.72rem",
+        background: "rgba(0,0,0,0.75)",
+        borderLeft: `3px solid ${ACCENT}`,
+        padding: "4px 8px",
+        display: "inline-block",
+        textAlign: "left" as const,
+      };
+    case "hook_banner":
+      return { ...base, color: ACCENT, fontSize: "0.95rem", textShadow: "0 2px 6px #000" };
+    default:
+      return { ...base, color: "#fff", textShadow: "0 2px 4px #000, 0 0 1px #000" };
+  }
+}
+
+function Chip({
+  label,
+  active,
+  onClick,
+  swatch,
+  swatchFilter,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  swatch?: string;
+  swatchFilter?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex shrink-0 flex-col items-center gap-1.5"
+      style={{ width: 64 }}
+    >
+      <span
+        className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl text-[10px] font-bold transition"
+        style={{
+          border: active ? `2px solid ${ACCENT}` : "2px solid rgba(255,255,255,0.12)",
+          background: swatch || (active ? "rgba(232,165,75,0.18)" : "#1a1a1a"),
+          color: active ? ACCENT : "rgba(255,255,255,0.85)",
+          boxShadow: active ? `0 0 0 1px rgba(232,165,75,0.25)` : undefined,
+        }}
+      >
+        {swatch ? (
+          <span
+            className="h-full w-full"
+            style={{
+              background: swatch,
+              filter: swatchFilter && swatchFilter !== "none" ? swatchFilter : undefined,
+            }}
+          />
+        ) : (
+          label.slice(0, 2).toUpperCase()
+        )}
+      </span>
+      <span
+        className="max-w-[64px] truncate text-center text-[10px] font-medium leading-tight"
+        style={{ color: active ? ACCENT : "rgba(255,255,255,0.55)" }}
+      >
+        {label}
+      </span>
+    </button>
+  );
+}
+
 export function VideoEditorStudio({ job }: { job: VideoJob }) {
   const router = useRouter();
   const { show: toast, notice } = useToast();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const musicRef = useRef<HTMLAudioElement | null>(null);
 
-  const [panel, setPanel] = useState<Panel>("effects");
+  const [cat, setCat] = useState<Category>("filters");
+  const [playing, setPlaying] = useState(false);
   const [effect, setEffect] = useState<(typeof EFFECTS)[number]["id"]>("cinematic");
   const [motion, setMotion] = useState<(typeof MOTIONS)[number]["id"]>("none");
   const [introFade, setIntroFade] = useState<(typeof FADES)[number]["id"]>("fade");
   const [outroFade, setOutroFade] = useState<(typeof FADES)[number]["id"]>("fadeblack");
+  const [transition, setTransition] =
+    useState<(typeof TRANSITIONS)[number]["id"]>("fade");
+  const [textStyle, setTextStyle] =
+    useState<(typeof TEXT_STYLES)[number]["id"]>("bold_center");
+  const [subtitleStyle, setSubtitleStyle] =
+    useState<(typeof SUBTITLE_STYLES)[number]["id"]>("classic");
+  const [overlayText, setOverlayText] = useState("");
+  const [captionText, setCaptionText] = useState("");
   const [musicMode, setMusicMode] = useState<"none" | "auto" | "track">("auto");
   const [musicTrackId, setMusicTrackId] = useState("");
   const [musicVolume, setMusicVolume] = useState(0.45);
@@ -96,8 +262,7 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
 
   const backHref = useMemo(() => parentReturnPath(job), [job]);
   const previewSrc = `/api/jobs/${job.id}/preview`;
-  const effectCss =
-    EFFECTS.find((e) => e.id === effect)?.css || "none";
+  const effectCss = EFFECTS.find((e) => e.id === effect)?.css || "none";
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +288,7 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
         }>).map((t) => ({
           id: String(t.id),
           title: t.title || `Track #${t.id}`,
-          author: t.author || "Jamendo",
+          author: t.author || "Library",
           previewUrl: t.previewUrl || null,
         })),
       );
@@ -148,11 +313,40 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
     const v = videoRef.current;
     if (!v) return;
     function tick() {
-      setCurrent(v!.currentTime || 0);
+      const t = v!.currentTime || 0;
+      setCurrent(t);
+      if (t >= trimEnd - 0.05) {
+        v!.pause();
+        setPlaying(false);
+        v!.currentTime = trimStart;
+        setCurrent(trimStart);
+      }
     }
     v.addEventListener("timeupdate", tick);
     return () => v.removeEventListener("timeupdate", tick);
-  }, []);
+  }, [trimEnd, trimStart]);
+
+  function togglePlay() {
+    const v = videoRef.current;
+    if (!v) return;
+    if (playing) {
+      v.pause();
+      setPlaying(false);
+      return;
+    }
+    if (v.currentTime < trimStart || v.currentTime >= trimEnd) {
+      v.currentTime = trimStart;
+    }
+    void v.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  }
+
+  function seekTo(ratio: number) {
+    const v = videoRef.current;
+    if (!v || duration <= 0) return;
+    const t = Math.max(trimStart, Math.min(trimEnd, ratio * duration));
+    v.currentTime = t;
+    setCurrent(t);
+  }
 
   function toggleMusicPreview(track: MusicTrack) {
     if (!track.previewUrl) return;
@@ -177,6 +371,9 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
     }
     setExporting(true);
     musicRef.current?.pause();
+    videoRef.current?.pause();
+    setPlaying(false);
+
     const res = await fetch("/api/jobs/edit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -186,6 +383,11 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
         motion,
         intro_fade: introFade,
         outro_fade: outroFade,
+        preferred_transition: transition,
+        text_style: textStyle,
+        subtitle_style: subtitleStyle,
+        overlay_text: overlayText.trim() || null,
+        caption_text: captionText.trim() || null,
         music_mode: musicMode,
         music_track_id: musicMode === "track" ? musicTrackId || null : null,
         music_volume: musicVolume,
@@ -201,98 +403,19 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
       return;
     }
     toast("Export started", "info");
-    const dest =
-      backHref === "/dashboard/clipping"
-        ? "/dashboard/clipping"
-        : "/dashboard/content";
-    router.push(dest);
+    router.push(backHref);
   }
 
-  const panels: { id: Panel; label: string }[] = [
-    { id: "effects", label: "Effects" },
-    { id: "motion", label: "Motion" },
-    { id: "fades", label: "Fades" },
-    { id: "music", label: "Music" },
-    { id: "audio", label: "Audio" },
-  ];
-
-  return (
-    <div className="fixed inset-0 z-[90] flex flex-col bg-[#0c0c0c] text-[color:var(--fg)]">
-      {notice}
-      <header className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3 md:px-6">
-        <Link
-          href={backHref}
-          className="rounded-lg border border-white/15 px-3 py-1.5 text-sm font-semibold text-[color:var(--muted)] transition hover:border-white/25 hover:text-[color:var(--fg)]"
-        >
-          Back
-        </Link>
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-[family-name:var(--font-syne)] text-lg tracking-tight" style={{ fontWeight: 700 }}>
-            Editor
-          </p>
-          <p className="truncate text-xs text-[color:var(--muted)]">
-            {job.title || "Untitled"}
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-primary px-5 text-sm"
-          disabled={exporting}
-          onClick={() => void onExport()}
-        >
-          {exporting ? "Exporting…" : "Export"}
-        </button>
-      </header>
-
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-3 md:p-6">
-            <div className="relative max-h-full w-full max-w-3xl overflow-hidden rounded-xl bg-black shadow-2xl">
-              <video
-                ref={videoRef}
-                src={previewSrc}
-                className="aspect-video max-h-[min(58vh,640px)] w-full object-contain"
-                style={{
-                  filter: effectCss === "none" ? undefined : effectCss,
-                }}
-                controls
-                playsInline
-                preload="metadata"
-                onLoadedMetadata={onLoadedMeta}
-              />
-              {effect === "vignette" && (
-                <div
-                  className="pointer-events-none absolute inset-0 rounded-xl"
-                  style={{
-                    boxShadow: "inset 0 0 80px 28px rgba(0,0,0,0.55)",
-                  }}
-                />
-              )}
-            </div>
-          </div>
-
-          <div className="shrink-0 space-y-3 border-t border-white/10 px-4 py-4 md:px-6">
-            <div className="flex items-center justify-between text-xs text-[color:var(--muted)]">
-              <span>{formatTime(current)}</span>
-              <span>
-                Trim {formatTime(trimStart)} – {formatTime(trimEnd)}
-              </span>
-              <span>{formatTime(duration)}</span>
-            </div>
-            <div className="relative h-10">
-              <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-white/10" />
-              <div
-                className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full"
-                style={{
-                  left: `${duration > 0 ? (trimStart / duration) * 100 : 0}%`,
-                  width: `${
-                    duration > 0
-                      ? ((trimEnd - trimStart) / duration) * 100
-                      : 100
-                  }%`,
-                  background: "rgba(232,165,75,0.85)",
-                }}
-              />
+  function renderDockTools() {
+    switch (cat) {
+      case "trim":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-3 px-1">
+            <div>
+              <div className="mb-1 flex justify-between text-[10px] text-white/50">
+                <span>Start</span>
+                <span>{formatTime(trimStart)}</span>
+              </div>
               <input
                 type="range"
                 min={0}
@@ -303,9 +426,15 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
                   const v = Number(e.target.value);
                   setTrimStart(Math.min(v, trimEnd - 0.5));
                 }}
-                className="absolute inset-x-0 top-0 h-10 w-full cursor-pointer appearance-none bg-transparent"
+                className="w-full accent-[#E8A54B]"
                 aria-label="Trim start"
               />
+            </div>
+            <div>
+              <div className="mb-1 flex justify-between text-[10px] text-white/50">
+                <span>End</span>
+                <span>{formatTime(trimEnd)}</span>
+              </div>
               <input
                 type="range"
                 min={0}
@@ -316,293 +445,421 @@ export function VideoEditorStudio({ job }: { job: VideoJob }) {
                   const v = Number(e.target.value);
                   setTrimEnd(Math.max(v, trimStart + 0.5));
                 }}
-                className="absolute inset-x-0 top-0 h-10 w-full cursor-pointer appearance-none bg-transparent opacity-70"
+                className="w-full accent-[#E8A54B]"
                 aria-label="Trim end"
               />
             </div>
           </div>
-        </div>
+        );
 
-        <aside className="flex max-h-[42vh] w-full shrink-0 flex-col border-t border-white/10 bg-[#121212] lg:max-h-none lg:w-[340px] lg:border-l lg:border-t-0">
-          <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-white/10 p-2">
-            {panels.map((p) => {
-              const on = panel === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPanel(p.id)}
-                  className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition"
-                  style={{
-                    background: on ? "rgba(232,165,75,0.16)" : "transparent",
-                    color: on ? "var(--accent)" : "var(--muted)",
-                  }}
-                >
-                  {p.label}
-                </button>
-              );
-            })}
+      case "filters":
+        return (
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {EFFECTS.map((e) => (
+              <Chip
+                key={e.id}
+                label={e.label}
+                active={effect === e.id}
+                onClick={() => setEffect(e.id)}
+                swatch="linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%)"
+                swatchFilter={e.css}
+              />
+            ))}
           </div>
+        );
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            {panel === "effects" && (
-              <div className="grid grid-cols-2 gap-2">
-                {EFFECTS.map((e) => {
-                  const on = effect === e.id;
-                  return (
-                    <button
-                      key={e.id}
-                      type="button"
-                      onClick={() => setEffect(e.id)}
-                      className="rounded-xl border px-3 py-3 text-left text-sm font-semibold transition"
-                      style={{
-                        borderColor: on
-                          ? "rgba(232,165,75,0.55)"
-                          : "rgba(255,255,255,0.1)",
-                        background: on
-                          ? "rgba(232,165,75,0.12)"
-                          : "rgba(255,255,255,0.03)",
-                        color: on ? "var(--accent)" : "var(--fg)",
-                      }}
-                    >
-                      {e.label}
-                    </button>
-                  );
-                })}
+      case "motion":
+        return (
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {MOTIONS.map((m) => (
+              <Chip
+                key={m.id}
+                label={m.label}
+                active={motion === m.id}
+                onClick={() => setMotion(m.id)}
+              />
+            ))}
+          </div>
+        );
+
+      case "inout":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-3">
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-white/45">
+                Intro
+              </p>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {FADES.map((f) => (
+                  <Chip
+                    key={`in-${f.id}`}
+                    label={f.label}
+                    active={introFade === f.id}
+                    onClick={() => setIntroFade(f.id)}
+                  />
+                ))}
               </div>
-            )}
-
-            {panel === "motion" && (
-              <div className="space-y-2">
-                {MOTIONS.map((m) => {
-                  const on = motion === m.id;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => setMotion(m.id)}
-                      className="flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-sm font-semibold"
-                      style={{
-                        borderColor: on
-                          ? "rgba(232,165,75,0.55)"
-                          : "rgba(255,255,255,0.1)",
-                        background: on
-                          ? "rgba(232,165,75,0.12)"
-                          : "transparent",
-                        color: on ? "var(--accent)" : "var(--fg)",
-                      }}
-                    >
-                      {m.label}
-                      {on && <span>✓</span>}
-                    </button>
-                  );
-                })}
+            </div>
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-white/45">
+                Outro
+              </p>
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {FADES.map((f) => (
+                  <Chip
+                    key={`out-${f.id}`}
+                    label={f.label}
+                    active={outroFade === f.id}
+                    onClick={() => setOutroFade(f.id)}
+                  />
+                ))}
               </div>
-            )}
+            </div>
+          </div>
+        );
 
-            {panel === "fades" && (
-              <div className="space-y-4">
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[color:var(--muted)]">
-                    Intro
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {FADES.map((f) => {
-                      const on = introFade === f.id;
-                      return (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => setIntroFade(f.id)}
-                          className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-                          style={{
-                            borderColor: on
-                              ? "rgba(232,165,75,0.55)"
-                              : "rgba(255,255,255,0.12)",
-                            color: on ? "var(--accent)" : "var(--fg)",
-                            background: on
-                              ? "rgba(232,165,75,0.12)"
-                              : "transparent",
-                          }}
-                        >
-                          {f.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div>
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[color:var(--muted)]">
-                    Outro
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {FADES.map((f) => {
-                      const on = outroFade === f.id;
-                      return (
-                        <button
-                          key={`out-${f.id}`}
-                          type="button"
-                          onClick={() => setOutroFade(f.id)}
-                          className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-                          style={{
-                            borderColor: on
-                              ? "rgba(232,165,75,0.55)"
-                              : "rgba(255,255,255,0.12)",
-                            color: on ? "var(--accent)" : "var(--fg)",
-                            background: on
-                              ? "rgba(232,165,75,0.12)"
-                              : "transparent",
-                          }}
-                        >
-                          {f.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
+      case "transition":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-2">
+            <p className="text-[10px] text-white/45">
+              Applied between stitched clips when your source has multiple segments.
+            </p>
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {TRANSITIONS.map((t) => (
+                <Chip
+                  key={t.id}
+                  label={t.label}
+                  active={transition === t.id}
+                  onClick={() => setTransition(t.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
 
-            {panel === "music" && (
-              <div className="space-y-3">
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    [
-                      { id: "none" as const, label: "None" },
-                      { id: "auto" as const, label: "Auto" },
-                      { id: "track" as const, label: "Pick" },
-                    ] as const
-                  ).map((m) => {
-                    const on = musicMode === m.id;
+      case "text":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-3">
+            <input
+              value={overlayText}
+              onChange={(e) => setOverlayText(e.target.value.slice(0, 120))}
+              placeholder="Title / hook…"
+              className="w-full rounded-lg border border-white/12 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/35"
+            />
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {TEXT_STYLES.map((s) => (
+                <Chip
+                  key={s.id}
+                  label={s.label}
+                  active={textStyle === s.id}
+                  onClick={() => setTextStyle(s.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+
+      case "captions":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-3">
+            <input
+              value={captionText}
+              onChange={(e) => setCaptionText(e.target.value.slice(0, 120))}
+              placeholder="Caption / subtitle…"
+              className="w-full rounded-lg border border-white/12 bg-black/40 px-3 py-2 text-sm text-white placeholder:text-white/35"
+            />
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {SUBTITLE_STYLES.map((s) => (
+                <Chip
+                  key={s.id}
+                  label={s.label}
+                  active={subtitleStyle === s.id}
+                  onClick={() => setSubtitleStyle(s.id)}
+                />
+              ))}
+            </div>
+          </div>
+        );
+
+      case "music":
+        return (
+          <div className="flex w-full min-w-0 flex-col gap-3">
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {(
+                [
+                  { id: "none" as const, label: "Off" },
+                  { id: "auto" as const, label: "Auto" },
+                  { id: "track" as const, label: "Pick" },
+                ] as const
+              ).map((m) => (
+                <Chip
+                  key={m.id}
+                  label={m.label}
+                  active={musicMode === m.id}
+                  onClick={() => setMusicMode(m.id)}
+                />
+              ))}
+            </div>
+            {musicMode !== "none" && (
+              <label className="block space-y-1 text-[10px] text-white/50">
+                Volume
+                <input
+                  type="range"
+                  min={0.05}
+                  max={1}
+                  step={0.01}
+                  value={musicVolume}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setMusicVolume(v);
+                    if (musicRef.current) musicRef.current.volume = v;
+                  }}
+                  className="w-full accent-[#E8A54B]"
+                />
+              </label>
+            )}
+            {musicMode === "track" && (
+              <div className="max-h-[120px] space-y-1 overflow-y-auto">
+                {musicLoading ? (
+                  <p className="text-xs text-white/45">Loading…</p>
+                ) : tracks.length === 0 ? (
+                  <p className="text-xs text-white/45">No tracks found</p>
+                ) : (
+                  tracks.map((t) => {
+                    const on = musicTrackId === t.id;
+                    const playingTrack = playingMusicId === t.id;
                     return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setMusicMode(m.id)}
-                        className="rounded-full border px-3 py-1.5 text-xs font-semibold"
+                      <div
+                        key={t.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-1.5"
                         style={{
-                          borderColor: on
-                            ? "rgba(232,165,75,0.55)"
-                            : "rgba(255,255,255,0.12)",
-                          color: on ? "var(--accent)" : "var(--fg)",
-                          background: on
-                            ? "rgba(232,165,75,0.12)"
-                            : "transparent",
+                          background: on ? "rgba(232,165,75,0.12)" : "transparent",
+                          border: `1px solid ${on ? "rgba(232,165,75,0.45)" : "transparent"}`,
                         }}
                       >
-                        {m.label}
-                      </button>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/10 text-[10px] text-white"
+                          disabled={!t.previewUrl}
+                          onClick={() => toggleMusicPreview(t)}
+                        >
+                          {playingTrack ? "■" : "▶"}
+                        </button>
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => setMusicTrackId(t.id)}
+                        >
+                          <span className="block truncate text-xs font-medium text-white">
+                            {t.title}
+                          </span>
+                          <span className="block truncate text-[10px] text-white/45">
+                            {t.author}
+                          </span>
+                        </button>
+                      </div>
                     );
-                  })}
-                </div>
-                {musicMode !== "none" && (
-                  <label className="block space-y-1 text-xs text-[color:var(--muted)]">
-                    Volume
-                    <input
-                      type="range"
-                      min={0.05}
-                      max={1}
-                      step={0.01}
-                      value={musicVolume}
-                      onChange={(e) => {
-                        const v = Number(e.target.value);
-                        setMusicVolume(v);
-                        if (musicRef.current) musicRef.current.volume = v;
-                      }}
-                      className="w-full"
-                    />
-                  </label>
+                  })
                 )}
-                {musicMode === "track" && (
-                  <div className="max-h-[280px] space-y-1.5 overflow-y-auto">
-                    {musicLoading ? (
-                      <p className="text-xs text-[color:var(--muted)]">
-                        Loading…
-                      </p>
-                    ) : (
-                      tracks.map((t) => {
-                        const on = musicTrackId === t.id;
-                        const playing = playingMusicId === t.id;
-                        return (
-                          <div
-                            key={t.id}
-                            className="flex items-center gap-2 rounded-lg px-2 py-1.5"
-                            style={{
-                              background: on
-                                ? "rgba(232,165,75,0.12)"
-                                : "transparent",
-                              border: `1px solid ${
-                                on ? "rgba(232,165,75,0.45)" : "transparent"
-                              }`,
-                            }}
-                          >
-                            <button
-                              type="button"
-                              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-sm"
-                              disabled={!t.previewUrl}
-                              onClick={() => toggleMusicPreview(t)}
-                            >
-                              {playing ? "■" : "▶"}
-                            </button>
-                            <button
-                              type="button"
-                              className="min-w-0 flex-1 text-left"
-                              onClick={() => setMusicTrackId(t.id)}
-                            >
-                              <span className="block truncate text-sm font-medium">
-                                {t.title}
-                              </span>
-                              <span className="block truncate text-[11px] text-[color:var(--muted)]">
-                                {t.author}
-                              </span>
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {panel === "audio" && (
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={() => setKeepOriginal(true)}
-                  className="flex w-full items-center justify-between rounded-xl border px-3 py-3 text-sm font-semibold"
-                  style={{
-                    borderColor: keepOriginal
-                      ? "rgba(232,165,75,0.55)"
-                      : "rgba(255,255,255,0.1)",
-                    background: keepOriginal
-                      ? "rgba(232,165,75,0.12)"
-                      : "transparent",
-                  }}
-                >
-                  Keep original audio
-                  {keepOriginal && <span>✓</span>}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setKeepOriginal(false)}
-                  className="flex w-full items-center justify-between rounded-xl border px-3 py-3 text-sm font-semibold"
-                  style={{
-                    borderColor: !keepOriginal
-                      ? "rgba(232,165,75,0.55)"
-                      : "rgba(255,255,255,0.1)",
-                    background: !keepOriginal
-                      ? "rgba(232,165,75,0.12)"
-                      : "transparent",
-                  }}
-                >
-                  Mute original (music only)
-                  {!keepOriginal && <span>✓</span>}
-                </button>
               </div>
             )}
           </div>
-        </aside>
+        );
+
+      case "sound":
+        return (
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            <Chip
+              label="Keep VO"
+              active={keepOriginal}
+              onClick={() => setKeepOriginal(true)}
+            />
+            <Chip
+              label="Mute VO"
+              active={!keepOriginal}
+              onClick={() => setKeepOriginal(false)}
+            />
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  const playheadPct = duration > 0 ? (current / duration) * 100 : 0;
+  const trimStartPct = duration > 0 ? (trimStart / duration) * 100 : 0;
+  const trimWidthPct =
+    duration > 0 ? ((trimEnd - trimStart) / duration) * 100 : 100;
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex flex-col text-white"
+      style={{ background: "#0a0a0a" }}
+    >
+      {notice}
+
+      <header
+        className="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3"
+        style={{ background: "#0a0a0a" }}
+      >
+        <Link
+          href={backHref}
+          className="shrink-0 text-sm font-medium text-white/60 transition hover:text-white"
+        >
+          ← Back
+        </Link>
+        <h1 className="min-w-0 flex-1 truncate text-center text-base font-semibold">
+          Edit
+        </h1>
+        <button
+          type="button"
+          disabled={exporting}
+          onClick={() => void onExport()}
+          className="shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold text-black transition disabled:opacity-50"
+          style={{ background: ACCENT }}
+        >
+          {exporting ? "…" : "Export"}
+        </button>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4 py-3">
+          <div
+            className="relative w-full max-w-[280px] overflow-hidden rounded-xl bg-black shadow-2xl"
+            style={{ aspectRatio: "9/16" }}
+          >
+            <video
+              ref={videoRef}
+              src={previewSrc}
+              className="h-full w-full object-cover"
+              style={{
+                filter: effectCss === "none" ? undefined : effectCss,
+              }}
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={onLoadedMeta}
+              onClick={togglePlay}
+            />
+
+            {effect === "vignette" && (
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{ boxShadow: "inset 0 0 60px 20px rgba(0,0,0,0.55)" }}
+              />
+            )}
+
+            {overlayText.trim() && (
+              <div className={`pointer-events-none ${overlayTextClass(textStyle)}`}>
+                <span style={overlayTextStyle(textStyle)}>
+                  {overlayText.trim().slice(0, 80)}
+                </span>
+              </div>
+            )}
+
+            {captionText.trim() && (
+              <div className="pointer-events-none absolute inset-x-3 bottom-[10%] text-center">
+                <span style={captionPreviewStyle(subtitleStyle)}>
+                  {captionText.trim().slice(0, 80)}
+                </span>
+              </div>
+            )}
+
+            {!playing && (
+              <button
+                type="button"
+                onClick={togglePlay}
+                className="absolute inset-0 flex items-center justify-center bg-black/25 transition hover:bg-black/35"
+                aria-label="Play"
+              >
+                <span
+                  className="flex h-14 w-14 items-center justify-center rounded-full text-2xl text-white shadow-lg"
+                  style={{ background: "rgba(0,0,0,0.55)" }}
+                >
+                  ▶
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 px-4 pb-2">
+          <div className="mb-1 flex justify-between text-[10px] text-white/45">
+            <span>{formatTime(current)}</span>
+            <span>
+              {formatTime(trimStart)} – {formatTime(trimEnd)}
+            </span>
+            <span>{formatTime(duration)}</span>
+          </div>
+          <div
+            className="relative h-8 cursor-pointer"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = (e.clientX - rect.left) / rect.width;
+              seekTo(ratio);
+            }}
+            role="slider"
+            aria-valuemin={0}
+            aria-valuemax={duration}
+            aria-valuenow={current}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft") seekTo(Math.max(0, (current - 1) / duration));
+              if (e.key === "ArrowRight") seekTo(Math.min(1, (current + 1) / duration));
+            }}
+          >
+            <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/12" />
+            <div
+              className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full"
+              style={{
+                left: `${trimStartPct}%`,
+                width: `${trimWidthPct}%`,
+                background: "rgba(232,165,75,0.35)",
+              }}
+            />
+            <div
+              className="absolute top-1/2 h-1 -translate-y-1/2 rounded-full"
+              style={{
+                left: 0,
+                width: `${playheadPct}%`,
+                background: ACCENT,
+              }}
+            />
+            <div
+              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow"
+              style={{ left: `${playheadPct}%`, background: ACCENT }}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div
+        className="shrink-0 border-t border-white/10"
+        style={{ background: "#111" }}
+      >
+        <div className="min-h-[132px] border-b border-white/8 px-4 py-3">
+          {renderDockTools()}
+        </div>
+
+        <div className="flex gap-1 overflow-x-auto px-2 py-2">
+          {CATEGORIES.map((c) => {
+            const on = cat === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCat(c.id)}
+                className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition"
+                style={{
+                  background: on ? "rgba(232,165,75,0.16)" : "transparent",
+                  color: on ? ACCENT : "rgba(255,255,255,0.5)",
+                }}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

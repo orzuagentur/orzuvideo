@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   let q = supabase
     .from("media_favorites")
     .select(
-      "id,kind,asset_id,title,author,thumb,preview_url,download_url,duration_sec,width,height,page_url,created_at",
+      "id,kind,asset_id,title,author,thumb,preview_url,download_url,duration_sec,width,height,created_at",
     )
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
         : null,
     width: body.width != null ? Number(body.width) : null,
     height: body.height != null ? Number(body.height) : null,
-    page_url: String(body.page_url || body.pageUrl || "").trim() || null,
+    page_url: null,
     meta: {},
   };
 

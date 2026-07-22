@@ -1,7 +1,8 @@
 """Auto-read new YouTube comments and reply using AI Training settings.
 
 Note: YouTube Data API does NOT support liking or hearting comments.
-We reply to each new unreplied comment when reply_comments_enabled is on.
+We reply to each new unreplied comment (top-level and nested viewer replies)
+when reply_comments_enabled is on.
 """
 
 from __future__ import annotations
@@ -33,24 +34,14 @@ def _already_handled(sb, comment_id: str) -> bool:
     return rows[0].get("status") in ("replied", "skipped")
 
 
-def _channel_already_replied(
-    comment: dict[str, Any],
-    own_channel_id: str | None,
-) -> bool:
-    if not own_channel_id:
-        return False
-    for r in comment.get("replies") or []:
-        if str(r.get("author_channel_id") or "") == str(own_channel_id):
-            return True
-    return False
-
-
 def _save_reply_row(
     sb,
     *,
     user_id: str,
     video_id: str,
-    comment: dict[str, Any],
+    comment_id: str,
+    comment_text: str,
+    comment_author: str,
     reply_text: str | None,
     status: str,
     error: str | None = None,
@@ -58,9 +49,9 @@ def _save_reply_row(
     payload: dict[str, Any] = {
         "user_id": user_id,
         "youtube_video_id": video_id,
-        "youtube_comment_id": comment["comment_id"],
-        "comment_text": (comment.get("text") or "")[:4000],
-        "comment_author": (comment.get("author") or "")[:200],
+        "youtube_comment_id": comment_id,
+        "comment_text": (comment_text or "")[:4000],
+        "comment_author": (comment_author or "")[:200],
         "reply_text": reply_text,
         "status": status,
         "error_message": (error or "")[:1500] if error else None,
@@ -71,7 +62,7 @@ def _save_reply_row(
     existing = (
         sb.table("comment_replies")
         .select("id")
-        .eq("youtube_comment_id", comment["comment_id"])
+        .eq("youtube_comment_id", comment_id)
         .limit(1)
         .execute()
     )
@@ -80,6 +71,74 @@ def _save_reply_row(
         sb.table("comment_replies").update(payload).eq("id", rows[0]["id"]).execute()
     else:
         sb.table("comment_replies").insert(payload).execute()
+
+
+def _pending_targets(
+    thread: dict[str, Any],
+    own_channel_id: str | None,
+) -> list[dict[str, Any]]:
+    """
+    Return viewer comments we should AI-reply to.
+
+    - Top-level: if no channel reply exists yet in the thread.
+    - Nested viewer replies published after the last channel reply (follow-ups).
+    Each target is keyed by its own comment id so follow-ups are not skipped.
+    """
+    own = str(own_channel_id or "")
+    targets: list[dict[str, Any]] = []
+    replies = list(thread.get("replies") or [])
+
+    # Chronological: replies without published_at stay at end
+    def _key(r: dict[str, Any]) -> str:
+        return str(r.get("published_at") or "")
+
+    replies_sorted = sorted(replies, key=_key)
+
+    top_id = str(thread.get("comment_id") or "")
+    top_author_ch = str(thread.get("author_channel_id") or "")
+    if top_id and top_author_ch != own:
+        channel_already = any(
+            str(r.get("author_channel_id") or "") == own for r in replies_sorted
+        )
+        if not channel_already:
+            targets.append(
+                {
+                    "comment_id": top_id,
+                    "author": thread.get("author") or "Viewer",
+                    "text": thread.get("text") or "",
+                    "author_channel_id": top_author_ch,
+                }
+            )
+
+    last_ours_idx = -1
+    for i, r in enumerate(replies_sorted):
+        if own and str(r.get("author_channel_id") or "") == own:
+            last_ours_idx = i
+
+    for i, r in enumerate(replies_sorted):
+        rid = str(r.get("id") or "")
+        if not rid:
+            continue
+        if own and str(r.get("author_channel_id") or "") == own:
+            continue
+        # Only follow-up viewer messages after our last reply
+        if last_ours_idx >= 0 and i <= last_ours_idx:
+            continue
+        # If we never replied, top-level handles the first message;
+        # still reply to extra nested viewer messages that appear before us
+        # only when they appear AFTER an initial channel reply (handled above).
+        if last_ours_idx < 0:
+            continue
+        targets.append(
+            {
+                "comment_id": rid,
+                "author": r.get("author") or "Viewer",
+                "text": r.get("text") or "",
+                "author_channel_id": str(r.get("author_channel_id") or ""),
+            }
+        )
+
+    return targets
 
 
 def process_comment_replies(*, max_replies: int = MAX_REPLIES_PER_TICK) -> int:
@@ -99,7 +158,6 @@ def process_comment_replies(*, max_replies: int = MAX_REPLIES_PER_TICK) -> int:
     if not rows:
         return 0
 
-    # Round-robin-ish: process a few users each tick
     for training in rows[:MAX_USERS_PER_TICK]:
         if replied >= max_replies:
             break
@@ -147,74 +205,65 @@ def process_comment_replies(*, max_replies: int = MAX_REPLIES_PER_TICK) -> int:
                 or ""
             )
 
-            for comment in comments:
+            for thread in comments:
                 if replied >= max_replies:
                     break
 
-                cid = comment.get("comment_id")
-                text = (comment.get("text") or "").strip()
-                if not cid or not text:
-                    continue
+                for target in _pending_targets(thread, own_id or None):
+                    if replied >= max_replies:
+                        break
+                    cid = target.get("comment_id")
+                    text = (target.get("text") or "").strip()
+                    if not cid or not text:
+                        continue
+                    if _already_handled(sb, cid):
+                        continue
 
-                # Don't reply to ourselves
-                if own_id and str(comment.get("author_channel_id") or "") == own_id:
-                    continue
+                    try:
+                        reply_text = generate_comment_reply(
+                            user_id=user_id,
+                            training=training,
+                            comment_text=text,
+                            comment_author=target.get("author"),
+                            job_id=job.get("id"),
+                        )
+                        yt = reply_to_comment(
+                            profile,
+                            parent_comment_id=cid,
+                            text=reply_text,
+                        )
+                        if yt.get("access_token"):
+                            sb.table("profiles").update(
+                                {"youtube_access_token": yt["access_token"]}
+                            ).eq("id", user_id).execute()
 
-                if _already_handled(sb, cid):
-                    continue
-                if _channel_already_replied(comment, own_id or None):
-                    _save_reply_row(
-                        sb,
-                        user_id=user_id,
-                        video_id=str(video_id),
-                        comment=comment,
-                        reply_text=None,
-                        status="skipped",
-                        error="Already has channel reply",
-                    )
-                    continue
-
-                try:
-                    reply_text = generate_comment_reply(
-                        user_id=user_id,
-                        training=training,
-                        comment_text=text,
-                        comment_author=comment.get("author"),
-                        job_id=job.get("id"),
-                    )
-                    yt = reply_to_comment(
-                        profile,
-                        parent_comment_id=cid,
-                        text=reply_text,
-                    )
-                    if yt.get("access_token"):
-                        sb.table("profiles").update(
-                            {"youtube_access_token": yt["access_token"]}
-                        ).eq("id", user_id).execute()
-
-                    _save_reply_row(
-                        sb,
-                        user_id=user_id,
-                        video_id=str(video_id),
-                        comment=comment,
-                        reply_text=reply_text,
-                        status="replied",
-                    )
-                    replied += 1
-                    print(
-                        f"[comments] replied video={video_id} "
-                        f"comment={cid[:12]}… user={user_id[:8]}"
-                    )
-                except Exception as exc:
-                    _save_reply_row(
-                        sb,
-                        user_id=user_id,
-                        video_id=str(video_id),
-                        comment=comment,
-                        reply_text=None,
-                        status="failed",
-                        error=str(exc),
-                    )
-                    print(f"[comments] reply failed {cid}: {exc}")
+                        _save_reply_row(
+                            sb,
+                            user_id=user_id,
+                            video_id=str(video_id),
+                            comment_id=cid,
+                            comment_text=text,
+                            comment_author=str(target.get("author") or ""),
+                            reply_text=reply_text,
+                            status="replied",
+                        )
+                        replied += 1
+                        print(
+                            f"[comments] replied video={video_id} "
+                            f"comment={cid[:12]}… user={user_id[:8]}"
+                        )
+                    except Exception as exc:
+                        _save_reply_row(
+                            sb,
+                            user_id=user_id,
+                            video_id=str(video_id),
+                            comment_id=cid,
+                            comment_text=text,
+                            comment_author=str(target.get("author") or ""),
+                            reply_text=None,
+                            status="failed",
+                            error=str(exc),
+                        )
+                        print(f"[comments] reply failed {cid}: {exc}")
 
     return replied

@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
 
   const text = (
     String(body.text || "").trim() ||
-    demoTextForGroup(String(body.groupId || "epic"))
+    demoTextForGroup(String(body.groupId || ""))
   ).slice(0, 1600);
 
   if (text.length < 12) {

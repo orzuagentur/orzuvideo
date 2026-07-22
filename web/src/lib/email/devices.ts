@@ -101,10 +101,6 @@ export async function recordLoginDevice(opts: {
       dateStyle: "medium",
       timeStyle: "short",
     });
-    const reason = isNewDevice
-      ? "New device (not on your saved list)"
-      : "Same browser fingerprint, but IP address changed";
-
     const mail = buildNewDeviceEmail({
       action: opts.action,
       deviceName,
@@ -112,7 +108,6 @@ export async function recordLoginDevice(opts: {
       ip: ip === "unknown" ? "Not available" : ip,
       location: location || "Unknown location",
       when: `${when} UTC`,
-      reason,
       appUrl: appUrl(),
     });
     const sent = await sendTransactionalEmail({

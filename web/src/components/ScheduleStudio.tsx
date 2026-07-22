@@ -21,11 +21,26 @@ const VIDEO_COUNT_OPTIONS = [1, 2, 3, 4, 5].map((n) => ({
 }));
 
 const TZ_OPTIONS = [
-  "Europe/Berlin",
-  "Europe/Moscow",
-  "Asia/Tashkent",
   "UTC",
+  "Europe/Berlin",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Moscow",
+  "Europe/Istanbul",
+  "Asia/Tashkent",
+  "Asia/Almaty",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Bangkok",
+  "Asia/Shanghai",
+  "Asia/Tokyo",
+  "Asia/Seoul",
+  "Australia/Sydney",
   "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Sao_Paulo",
 ].map((tz) => ({ value: tz, label: tz }));
 
 const MODE_OPTIONS: { value: string; label: string }[] = [

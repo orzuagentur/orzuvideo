@@ -98,7 +98,12 @@ export async function GET(request: Request) {
     const perDay = Math.min(10, Math.max(1, Number(schedule.videos_per_day) || 1));
     const activeTimes = times.slice(0, perDay);
 
-    const matchedTime = activeTimes.find((t) => t === hhmm);
+    const matchedTime = activeTimes.find((t) => {
+      // Hourly Vercel cron: match any scheduled minute within the current hour
+      const [th] = t.split(":");
+      const [ch] = hhmm.split(":");
+      return String(th).padStart(2, "0") === String(ch).padStart(2, "0");
+    });
     if (!matchedTime) continue;
     if (!dayAllowed(schedule, weekday, dateStr)) continue;
 

@@ -20,7 +20,9 @@ type YtComment = {
     id: string;
     author: string;
     text: string;
+    authorChannelId?: string | null;
     publishedAt?: string | null;
+    likeCount?: number;
   }>;
 };
 
@@ -547,44 +549,66 @@ function VideoDetailModal({
                           </div>
                         )}
 
-                        {!c.repliedByUs && (
-                          <div className="space-y-1.5">
-                            <textarea
-                              className="field min-h-[56px] w-full text-sm"
-                              placeholder="Write a reply..."
-                              value={replyDraft[cid] || ""}
-                              disabled={Boolean(busy)}
-                              onChange={(e) =>
-                                setReplyDraft((prev) => ({
-                                  ...prev,
-                                  [cid]: e.target.value,
-                                }))
-                              }
-                            />
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                className="btn btn-primary text-xs"
-                                disabled={Boolean(busy)}
-                                onClick={() => void sendReply(c, "manual")}
-                              >
-                                {busyComment === `${cid}:manual`
-                                  ? "Sending..."
-                                  : "Reply"}
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-ghost text-xs"
-                                disabled={Boolean(busy)}
-                                onClick={() => void sendReply(c, "ai")}
-                              >
-                                {busyComment === `${cid}:ai`
-                                  ? "AI writing..."
-                                  : "AI reply"}
-                              </button>
-                            </div>
-                          </div>
+                        {(c.replies || []).length > 0 && (
+                          <ul className="space-y-2 border-l border-[color:var(--line)] pl-3">
+                            {(c.replies || []).map((r) => (
+                              <li key={r.id || `${r.author}-${r.text.slice(0, 24)}`}>
+                                <p className="text-[11px] text-[color:var(--muted)]">
+                                  <span className="font-medium text-[color:var(--fg)]">
+                                    {r.author}
+                                  </span>
+                                  {r.publishedAt
+                                    ? ` · ${formatFixedDate(r.publishedAt)}`
+                                    : ""}
+                                </p>
+                                <p className="mt-0.5 whitespace-pre-wrap text-sm leading-snug">
+                                  {r.text}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
                         )}
+
+                        <div className="space-y-1.5">
+                          <textarea
+                            className="field min-h-[56px] w-full text-sm"
+                            placeholder={
+                              c.repliedByUs
+                                ? "Reply again to this thread…"
+                                : "Write a reply..."
+                            }
+                            value={replyDraft[cid] || ""}
+                            disabled={Boolean(busy)}
+                            onChange={(e) =>
+                              setReplyDraft((prev) => ({
+                                ...prev,
+                                [cid]: e.target.value,
+                              }))
+                            }
+                          />
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="btn btn-primary text-xs"
+                              disabled={Boolean(busy)}
+                              onClick={() => void sendReply(c, "manual")}
+                            >
+                              {busyComment === `${cid}:manual`
+                                ? "Sending..."
+                                : "Reply"}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost text-xs"
+                              disabled={Boolean(busy)}
+                              onClick={() => void sendReply(c, "ai")}
+                            >
+                              {busyComment === `${cid}:ai`
+                                ? "AI writing..."
+                                : "AI reply"}
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     </li>
                   );

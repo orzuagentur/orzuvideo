@@ -1,27 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import {
+  EFFECT_IDS,
+  FADE_IDS,
+  MOTION_IDS,
+  SUBTITLE_STYLE_IDS,
+  TEXT_STYLE_IDS,
+  TRANSITION_IDS,
+} from "@/lib/editor-catalog";
 
 export const runtime = "nodejs";
-
-const EFFECTS = new Set([
-  "none",
-  "cinematic",
-  "vivid",
-  "soft",
-  "noir",
-  "punch",
-  "vignette",
-]);
-const MOTIONS = new Set([
-  "none",
-  "slow_push",
-  "punch_in",
-  "rise",
-  "drift_left",
-  "drift_right",
-  "snap_zoom",
-]);
-const FADES = new Set(["none", "fade", "fadeblack", "fadewhite"]);
 
 function parentLibrary(meta: Record<string, unknown> | null): "creativity" | "clipping" {
   const src = String(meta?.source || "").toLowerCase();
@@ -87,17 +75,32 @@ export async function POST(request: Request) {
   const motion = String(body.motion || "none").trim();
   const intro_fade = String(body.intro_fade || "none").trim();
   const outro_fade = String(body.outro_fade || "none").trim();
-  if (!EFFECTS.has(effect)) {
+  const preferred_transition = String(body.preferred_transition || "fade").trim();
+  const subtitle_style = String(body.subtitle_style || "classic").trim();
+  const text_style = String(body.text_style || "bold_center").trim();
+  const overlay_text = String(body.overlay_text || "").trim().slice(0, 120);
+  const caption_text = String(body.caption_text || "").trim().slice(0, 120);
+
+  if (!EFFECT_IDS.has(effect)) {
     return NextResponse.json({ error: "Invalid effect" }, { status: 400 });
   }
-  if (!MOTIONS.has(motion)) {
+  if (!MOTION_IDS.has(motion)) {
     return NextResponse.json({ error: "Invalid motion" }, { status: 400 });
   }
-  if (!FADES.has(intro_fade) || !FADES.has(outro_fade)) {
+  if (!FADE_IDS.has(intro_fade) || !FADE_IDS.has(outro_fade)) {
     return NextResponse.json({ error: "Invalid fade" }, { status: 400 });
   }
+  if (!TRANSITION_IDS.has(preferred_transition)) {
+    return NextResponse.json({ error: "Invalid transition" }, { status: 400 });
+  }
+  if (!SUBTITLE_STYLE_IDS.has(subtitle_style)) {
+    return NextResponse.json({ error: "Invalid subtitle style" }, { status: 400 });
+  }
+  if (!TEXT_STYLE_IDS.has(text_style)) {
+    return NextResponse.json({ error: "Invalid text style" }, { status: 400 });
+  }
 
-  const music_mode = String(body.music_mode || "none").trim(); // none | auto | track
+  const music_mode = String(body.music_mode || "none").trim();
   const music_track_id =
     music_mode === "track"
       ? String(body.music_track_id || "").trim() || null
@@ -146,6 +149,11 @@ export async function POST(request: Request) {
     motion,
     intro_fade,
     outro_fade,
+    preferred_transition,
+    subtitle_style,
+    text_style,
+    overlay_text: overlay_text || null,
+    caption_text: caption_text || null,
     music_mode,
     music_track_id,
     music_volume,

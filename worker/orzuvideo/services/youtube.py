@@ -39,13 +39,54 @@ def youtube_client(profile: dict[str, Any]):
     return build("youtube", "v3", credentials=creds), creds
 
 
+def list_comment_replies(
+    profile: dict[str, Any],
+    parent_id: str,
+    *,
+    max_results: int = 100,
+) -> list[dict[str, Any]]:
+    """All replies under a top-level comment (paginated)."""
+    youtube, _ = youtube_client(profile)
+    out: list[dict[str, Any]] = []
+    page_token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {
+            "part": "snippet",
+            "parentId": parent_id,
+            "maxResults": min(100, max(1, max_results)),
+            "textFormat": "plainText",
+        }
+        if page_token:
+            kwargs["pageToken"] = page_token
+        response = youtube.comments().list(**kwargs).execute()
+        for item in response.get("items") or []:
+            sn = item.get("snippet") or {}
+            ac = sn.get("authorChannelId")
+            out.append(
+                {
+                    "id": item.get("id") or "",
+                    "author": sn.get("authorDisplayName") or "Viewer",
+                    "text": sn.get("textDisplay") or sn.get("textOriginal") or "",
+                    "author_channel_id": (
+                        (ac or {}).get("value") if isinstance(ac, dict) else ""
+                    ),
+                    "published_at": sn.get("publishedAt"),
+                    "like_count": int(sn.get("likeCount") or 0),
+                }
+            )
+        page_token = response.get("nextPageToken")
+        if not page_token or len(out) >= 400:
+            break
+    return out
+
+
 def list_video_comment_threads(
     profile: dict[str, Any],
     video_id: str,
     *,
     max_results: int = 50,
 ) -> list[dict[str, Any]]:
-    """Newest top-level comments for a video (owner auth)."""
+    """Newest top-level comments for a video (owner auth), with full reply threads."""
     youtube, _ = youtube_client(profile)
     response = (
         youtube.commentThreads()
@@ -69,6 +110,7 @@ def list_video_comment_threads(
         ac = sn.get("authorChannelId")
         if isinstance(ac, dict):
             author_channel = str(ac.get("value") or "")
+        total_replies = int((item.get("snippet") or {}).get("totalReplyCount") or 0)
         replies_raw = ((item.get("replies") or {}).get("comments")) or []
         reply_texts = []
         for r in replies_raw:
@@ -82,8 +124,14 @@ def list_video_comment_threads(
                     "author_channel_id": (
                         (ac_r or {}).get("value") if isinstance(ac_r, dict) else ""
                     ),
+                    "published_at": rsn.get("publishedAt"),
                 }
             )
+        if total_replies > len(reply_texts):
+            try:
+                reply_texts = list_comment_replies(profile, comment_id)
+            except Exception as exc:
+                print(f"[comments] full replies failed {comment_id[:12]}: {exc}")
         out.append(
             {
                 "thread_id": item.get("id"),
@@ -93,9 +141,7 @@ def list_video_comment_threads(
                 "text": sn.get("textDisplay") or "",
                 "published_at": sn.get("publishedAt"),
                 "like_count": int(sn.get("likeCount") or 0),
-                "reply_count": int(
-                    (item.get("snippet") or {}).get("totalReplyCount") or 0
-                ),
+                "reply_count": total_replies or len(reply_texts),
                 "replies": reply_texts,
             }
         )

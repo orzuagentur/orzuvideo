@@ -1,9 +1,18 @@
-"""Deprecated Jamendo module — music now comes from the user's R2 library.
+"""Background music from the platform R2 library (genres + tracks)."""
 
-Kept as a thin re-export so old imports do not break during deploy.
-"""
+from __future__ import annotations
 
-from orzuvideo.services.media_pick import LibraryTrack as JamendoTrack
-from orzuvideo.services.media_pick import attribution_line
+# Re-export library picker for older imports
+from orzuvideo.services.media_pick import (  # noqa: F401
+    LibraryTrack,
+    attribution_line,
+    fetch_background_music,
+    pick_library_track,
+)
 
-__all__ = ["JamendoTrack", "attribution_line"]
+__all__ = [
+    "LibraryTrack",
+    "attribution_line",
+    "fetch_background_music",
+    "pick_library_track",
+]

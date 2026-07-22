@@ -50,6 +50,37 @@ function lightVideoFile(files: { link?: string; width?: number; height?: number 
 
 const PAGE_SIZE = 40;
 
+/** Hide upstream CDN / catalog URLs from the client — serve via our download proxy only. */
+function sanitizeClientMedia(items: MediaCard[]): MediaCard[] {
+  return items.map((it) => {
+    const type =
+      it.kind === "photo" ? "photo" : it.kind === "music" ? "music" : "video";
+    const ext = type === "photo" ? "jpg" : type === "music" ? "mp3" : "mp4";
+    const wrap = (url: string | null, inline: boolean, name: string) => {
+      if (!url) return null;
+      if (url.startsWith("/api/")) return url;
+      const params = new URLSearchParams({
+        url,
+        type,
+        filename: name,
+      });
+      if (inline) params.set("inline", "1");
+      return `/api/media/download?${params}`;
+    };
+    return {
+      ...it,
+      pageUrl: null,
+      thumb: wrap(it.thumb, true, `stock-${it.id}-thumb.${ext === "mp3" ? "jpg" : ext === "mp4" ? "jpg" : ext}`),
+      previewUrl: wrap(
+        it.previewUrl,
+        true,
+        `stock-${it.id}-preview.${ext}`,
+      ),
+      downloadUrl: wrap(it.downloadUrl, false, `stock-${it.id}.${ext}`),
+    };
+  });
+}
+
 async function searchPexelsVideos(
   key: string,
   q: string,
@@ -90,7 +121,7 @@ async function searchPexelsVideos(
         id: String(v.id),
         kind: "video" as const,
         title: `Video #${v.id}`,
-        author: v.user?.name || "Pexels",
+        author: v.user?.name || "Stock",
         thumb:
           v.image ||
           v.video_pictures?.[0]?.picture ||
@@ -100,7 +131,7 @@ async function searchPexelsVideos(
         durationSec: v.duration ?? null,
         width: v.width ?? null,
         height: v.height ?? null,
-        pageUrl: v.url || null,
+        pageUrl: null,
         downloadAllowed: Boolean(downloadUrl),
       };
     },
@@ -148,14 +179,14 @@ async function searchPexelsPhotos(
       id: String(p.id),
       kind: "photo" as const,
       title: p.alt || `Photo #${p.id}`,
-      author: p.photographer || "Pexels",
+      author: p.photographer || "Stock",
       thumb: p.src?.medium || p.src?.large || null,
       previewUrl: p.src?.large2x || p.src?.large || p.src?.original || null,
       downloadUrl: p.src?.original || p.src?.large2x || null,
       durationSec: null,
       width: p.width ?? null,
       height: p.height ?? null,
-      pageUrl: p.url || null,
+      pageUrl: null,
       downloadAllowed: Boolean(p.src?.original || p.src?.large2x),
     }),
   );
@@ -310,7 +341,7 @@ export async function GET(request: Request) {
         tracks.items.length >= take;
 
       return NextResponse.json({
-        items: mixed,
+        items: sanitizeClientMedia(mixed),
         total:
           Number(videos.total || 0) +
           Number(photos.total || 0) +
@@ -318,7 +349,6 @@ export async function GET(request: Request) {
         page: safePage,
         pageSize,
         hasMore: more,
-        provider: "mixed",
         counts: {
           video: videos.items.length,
           photo: photos.items.length,
@@ -331,7 +361,7 @@ export async function GET(request: Request) {
       const key = process.env.PEXELS_API_KEY;
       if (!key) {
         return NextResponse.json(
-          { error: "PEXELS_API_KEY is not configured" },
+          { error: "Media search is not configured" },
           { status: 500 },
         );
       }
@@ -340,12 +370,11 @@ export async function GET(request: Request) {
           ? await searchPexelsVideos(key, q, page, orientation)
           : await searchPexelsPhotos(key, q, page, orientation);
       return NextResponse.json({
-        items: result.items,
+        items: sanitizeClientMedia(result.items),
         total: result.total,
         page,
         pageSize: PAGE_SIZE,
         hasMore: result.items.length >= PAGE_SIZE,
-        provider: "pexels",
       });
     }
 
@@ -358,12 +387,11 @@ export async function GET(request: Request) {
         genreId,
       );
       return NextResponse.json({
-        items: result.items,
+        items: sanitizeClientMedia(result.items),
         total: result.total,
         page,
         pageSize: PAGE_SIZE,
         hasMore: result.items.length >= PAGE_SIZE,
-        provider: "library",
       });
     }
 

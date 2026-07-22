@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
+import { HomeStudio } from "@/components/HomeStudio";
 
-/** Media moved to the separate admin project. */
-export default function DashboardPage() {
-  redirect("/dashboard/content");
+export default function DashboardHomePage() {
+  return <HomeStudio />;
 }

@@ -974,7 +974,7 @@ def process_job(job: dict) -> None:
             else _clip_count_for_duration(base_clips, dur_for_clips)
         )
         used_pexels = exclude_used_media(sb, user_id, "pexels", avoid_days=avoid_days)
-        print(f"[MEDIA] pexels exclude={len(used_pexels)} jamendo history tracked per user")
+        print(f"[MEDIA] pexels exclude={len(used_pexels)} library music history tracked per user")
 
         db.update_job(sb, job_id, status="fetching_media")
         queries = [
@@ -1031,7 +1031,7 @@ def process_job(job: dict) -> None:
         except (TypeError, ValueError):
             voice_vol = 1.05
 
-        jamendo, credit = fetch_background_music(
+        library_track, credit = fetch_background_music(
             sb,
             user_id,
             job_id,
@@ -1039,11 +1039,11 @@ def process_job(job: dict) -> None:
             training,
             script_mood=str(script_data.get("music_mood") or "").strip() or None,
         )
-        if not jamendo or jamendo.path is None or not jamendo.path.exists():
+        if not library_track or library_track.path is None or not library_track.path.exists():
             raise RuntimeError(
                 "No platform music yet. An admin must upload tracks in the admin Music library."
             )
-        music_path = jamendo.path
+        music_path = library_track.path
         print(f"Background music ready: {music_path} ({music_path.stat().st_size} bytes)")
         description = script_data["description"]
         meta = {
@@ -1051,11 +1051,11 @@ def process_job(job: dict) -> None:
             "hook": script_data["hook"],
             "pexels_queries": script_data["pexels_queries"],
             "pexels_ids": pexels_ids,
-            "jamendo": {
-                "id": jamendo.id,
-                "name": jamendo.name,
-                "artist": jamendo.artist,
-                "url": jamendo.shareurl,
+            "music": {
+                "id": library_track.id,
+                "name": library_track.name,
+                "artist": library_track.artist,
+                "genre": library_track.genre,
             },
             "music_attached": True,
             "music_bytes": music_path.stat().st_size,
@@ -1083,6 +1083,17 @@ def process_job(job: dict) -> None:
             music_volume_body=body_vol,
             voice_volume=voice_vol,
             size=(out_w, out_h),
+            subtitle_style=str(
+                script_data.get("subtitle_style")
+                or meta0.get("subtitle_style")
+                or "classic"
+            ),
+            visual_effect=str(
+                script_data.get("visual_effect")
+                or meta0.get("visual_effect")
+                or meta0.get("effect")
+                or "cinematic"
+            ),
         )
         db.update_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
 

@@ -2,9 +2,16 @@ import Link from "next/link";
 import { SiteChrome } from "@/components/SiteChrome";
 
 export const metadata = {
-  title: "OrzuAi — AI YouTube Shorts",
+  title: "OrzuAi — AI YouTube Shorts Studio",
   description:
-    "OrzuAi helps creators generate and publish YouTube Shorts with AI scripts, voice, media, and scheduling.",
+    "OrzuAi helps creators generate and publish YouTube Shorts with AI scripts, voice, media, captions, AI clipping, and scheduling at www.orzuai.com.",
+  keywords: [
+    "OrzuAi",
+    "AI YouTube Shorts",
+    "AI video generator",
+    "YouTube Shorts automation",
+  ],
+  alternates: { canonical: "/" },
 };
 
 export default function HomePage() {
@@ -33,6 +40,9 @@ export default function HomePage() {
           <Link href="/login" className="btn btn-ghost">
             Log in
           </Link>
+          <Link href="/about" className="btn btn-ghost">
+            About
+          </Link>
         </div>
 
         <ul className="mt-14 grid gap-4 sm:grid-cols-3">
@@ -42,8 +52,8 @@ export default function HomePage() {
               d: "Scripts, voice, captions, and scheduling for daily Shorts.",
             },
             {
-              t: "Media & music",
-              d: "Stock footage, your R2 music library, and creator assets.",
+              t: "AI clipping & creativity",
+              d: "Prompt-based videos, montage transitions, and clip remixes.",
             },
             {
               t: "YouTube connect",

@@ -132,9 +132,10 @@ export function ChannelsMenu({
       <div className="border-t border-[color:var(--line)] p-2">
         <a
           href="/api/youtube/connect"
-          className="btn btn-primary flex w-full !py-1.5 justify-center text-xs"
+          className="flex w-full items-center justify-center gap-2 rounded-full px-3 py-2.5 text-xs font-semibold text-white transition hover:brightness-110"
+          style={{ background: "#FF0000" }}
         >
-          + Add channel
+          + Connect / change channel
         </a>
       </div>
     </div>

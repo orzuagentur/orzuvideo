@@ -192,7 +192,7 @@ function AddSourceMenu({
       >
         <span className="text-sm font-semibold">Media library</span>
         <span className="text-xs text-[color:var(--muted)]">
-          Pexels videos from Media (our API)
+          Stock videos from your studio library
         </span>
       </button>
     </div>
@@ -279,7 +279,7 @@ function LibraryModal({
           <div>
             <h2 className="text-lg font-semibold">Media library</h2>
             <p className="text-xs text-[color:var(--muted)]">
-              Same Pexels videos as Media â€” loaded via our API
+              Stock videos from your studio library
             </p>
           </div>
           <button type="button" className="btn btn-ghost text-sm" onClick={onClose}>
@@ -396,7 +396,7 @@ function LibraryModal({
                           {item.title}
                         </p>
                         <p className="text-[10px] text-[color:var(--muted)]">
-                          {item.author || "Pexels"}
+                          {item.author || "Stock"}
                           {item.duration_seconds
                             ? ` Â· ${item.duration_seconds}s`
                             : ""}
@@ -536,7 +536,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
       ).map((t) => ({
         id: String(t.id),
         name: t.title || `Track #${t.id}`,
-        artist: t.author || "Jamendo",
+        artist: t.author || "Library",
         previewUrl: t.previewUrl || null,
       }));
       setMusicTracks(tracks);
@@ -663,7 +663,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
         title: item.title,
         previewUrl: item.thumb_url || item.media_url,
         mediaId: item.id,
-        provider: item.provider || "pexels",
+        provider: "library",
         downloadUrl: item.download_url || item.media_url,
       });
     }
@@ -731,7 +731,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
             kind: "media",
             title: s.title,
             media_id: s.mediaId,
-            provider: s.provider || "pexels",
+            provider: "library",
             download_url: s.downloadUrl,
             url: s.downloadUrl,
           });

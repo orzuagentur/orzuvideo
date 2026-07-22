@@ -19,10 +19,30 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_APP_URL || "https://www.orzuai.com",
   ),
-  title: "OrzuAi — AI YouTube Shorts",
+  title: {
+    default: "OrzuAi — AI YouTube Shorts Studio",
+    template: "%s · OrzuAi",
+  },
   description:
-    "Train once. OrzuAi creates and publishes two Shorts every day.",
+    "OrzuAi is an AI creator studio: generate YouTube Shorts with scripts, voice, captions, stock montage, AI clipping, music, and optional YouTube publishing.",
   applicationName: "OrzuAi",
+  keywords: [
+    "OrzuAi",
+    "AI YouTube Shorts",
+    "AI video generator",
+    "YouTube Shorts automation",
+    "AI clipping tool",
+    "auto publish Shorts",
+    "creator AI studio",
+    "short form video AI",
+  ],
+  authors: [{ name: "OrzuAi", url: "https://www.orzuai.com" }],
+  creator: "OrzuAi",
+  publisher: "OrzuAi",
+  category: "technology",
+  alternates: {
+    canonical: "/",
+  },
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
@@ -37,12 +57,29 @@ export const metadata: Metadata = {
     apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
   },
   openGraph: {
-    title: "OrzuAi",
+    title: "OrzuAi — AI YouTube Shorts Studio",
     description:
-      "Train once. OrzuAi creates and publishes two Shorts every day.",
+      "Train once. OrzuAi creates and publishes YouTube Shorts with AI scripts, voice, media, and scheduling.",
     url: "https://www.orzuai.com",
     siteName: "OrzuAi",
+    locale: "en_US",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "OrzuAi — AI YouTube Shorts Studio",
+    description:
+      "AI YouTube Shorts studio: scripts, voice, captions, clipping, and publishing.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
 };
 
@@ -60,9 +97,35 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "OrzuAi",
+    applicationCategory: "MultimediaApplication",
+    operatingSystem: "Web",
+    url: "https://www.orzuai.com",
+    description:
+      "AI creator studio for YouTube Shorts: scripts, voice, captions, montage, AI clipping, and YouTube publishing.",
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "OrzuAi",
+      url: "https://www.orzuai.com",
+      email: "support@orzuai.com",
+    },
+  };
+
   return (
     <html lang="en" className={`${syne.variable} ${dmSans.variable} h-full`}>
       <body className="min-h-full antialiased">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
         {children}
         <PwaRegister />
       </body>

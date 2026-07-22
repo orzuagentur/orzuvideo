@@ -226,7 +226,7 @@ export function buildNewDeviceEmail(opts: {
   ip: string;
   location: string;
   when: string;
-  reason: string;
+  reason?: string;
   appUrl: string;
 }) {
   return {
@@ -236,8 +236,7 @@ export function buildNewDeviceEmail(opts: {
       preheader: `${opts.deviceName} · ${opts.ip}`,
       bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">A sign-in to your OrzuAi account does not match a device or IP address we have on file.</p>
         <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;font-size:14px;color:#cfcabe;">
-          <tr><td style="padding:6px 0;width:130px;color:#9a958c;">Reason</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.reason)}</td></tr>
-          <tr><td style="padding:6px 0;color:#9a958c;">Action</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.action)}</td></tr>
+          <tr><td style="padding:6px 0;width:130px;color:#9a958c;">Action</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.action)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">Device</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.deviceName)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">Type</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.deviceType)}</td></tr>
           <tr><td style="padding:6px 0;color:#9a958c;">IP address</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.ip)}</td></tr>
@@ -273,7 +272,6 @@ export function previewEmailHtml(id: EmailTemplateId, appUrl: string): string {
         ip: "203.0.113.42",
         location: "Berlin, Germany (approx.)",
         when: "22 Jul 2026, 21:15 UTC",
-        reason: "New device (not on your saved list)",
         appUrl,
       }).html;
     default:

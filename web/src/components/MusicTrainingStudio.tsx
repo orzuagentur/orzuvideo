@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  MUSIC_GROUPS,
   clampMusicVolume,
   clampVoiceVolume,
   demoTextForGroup,
   type CustomMusicGroup,
+  type LibraryGenre,
   type MusicPrefs,
   type MusicTrackRef,
   defaultMusicPrefs,
@@ -29,8 +29,10 @@ export function MusicTrainingStudio({
 }: Props) {
   const prefs = { ...defaultMusicPrefs(), ...value };
   const { show: toast, notice } = useToast();
+  const [genres, setGenres] = useState<LibraryGenre[]>([]);
   const [tracks, setTracks] = useState<MusicTrackRef[]>([]);
   const [loading, setLoading] = useState(false);
+  const [genresLoading, setGenresLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [demoOn, setDemoOn] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -48,7 +50,7 @@ export function MusicTrainingStudio({
   const isCustom = Boolean(activeCustom);
 
   const demoText = useMemo(
-    () => demoTextForGroup(prefs.active_group_id || "epic"),
+    () => demoTextForGroup(prefs.active_group_id || ""),
     [prefs.active_group_id],
   );
 
@@ -82,11 +84,56 @@ export function MusicTrainingStudio({
   }, [toast]);
 
   useEffect(() => {
+    let cancelled = false;
+    setGenresLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/music/genres");
+        const data = await res.json().catch(() => ({}));
+        if (cancelled) return;
+        if (!res.ok) {
+          setGenres([]);
+          return;
+        }
+        const items = ((data.items || []) as Array<{
+          id: string;
+          name: string;
+          slug: string;
+          trackCount?: number;
+        }>).map((g) => ({
+          id: g.id,
+          name: g.name,
+          slug: g.slug,
+          trackCount: g.trackCount,
+        }));
+        setGenres(items);
+        if (!prefs.active_group_id && !prefs.custom_groups.length && items[0]) {
+          onChange({
+            ...prefs,
+            active_group_id: items[0].slug,
+            selected_track_ids: [],
+          });
+        }
+      } finally {
+        if (!cancelled) setGenresLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     if (isCustom) {
       setTracks(activeCustom?.tracks || []);
       return;
     }
-    void loadGroup(prefs.active_group_id || "epic");
+    if (prefs.active_group_id) {
+      void loadGroup(prefs.active_group_id);
+    } else {
+      setTracks([]);
+    }
   }, [prefs.active_group_id, isCustom, activeCustom, loadGroup]);
 
   function stopAll() {
@@ -265,9 +312,10 @@ export function MusicTrainingStudio({
     stopAll();
     const next = prefs.custom_groups.filter((g) => g.id !== groupId);
     const switchingAway = prefs.active_group_id === groupId;
+    const fallback = genres[0]?.slug || "";
     patch({
       custom_groups: next,
-      active_group_id: switchingAway ? "epic" : prefs.active_group_id,
+      active_group_id: switchingAway ? fallback : prefs.active_group_id,
       selected_track_ids: switchingAway ? [] : prefs.selected_track_ids,
     });
   }
@@ -305,7 +353,7 @@ export function MusicTrainingStudio({
             ) : null}
           </h2>
           <p className="mt-0.5 text-sm text-[color:var(--muted)]">
-            Pick a group and at least one track
+            Pick a genre from your music library and at least one track
           </p>
         </div>
         <div className="shrink-0 rounded-full border border-[color:var(--line)] px-3 py-1.5 text-right">
@@ -322,8 +370,16 @@ export function MusicTrainingStudio({
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {MUSIC_GROUPS.map((g) => {
-          const on = prefs.active_group_id === g.id;
+        {genresLoading && (
+          <p className="text-xs text-[color:var(--muted)]">Loading genres…</p>
+        )}
+        {!genresLoading && genres.length === 0 && (
+          <p className="text-xs text-[color:var(--muted)]">
+            No library genres yet — upload music in the admin Music section.
+          </p>
+        )}
+        {genres.map((g) => {
+          const on = prefs.active_group_id === g.slug;
           return (
             <button
               key={g.id}
@@ -331,7 +387,7 @@ export function MusicTrainingStudio({
               onClick={() => {
                 stopAll();
                 patch({
-                  active_group_id: g.id,
+                  active_group_id: g.slug,
                   selected_track_ids: [],
                 });
               }}
@@ -341,9 +397,11 @@ export function MusicTrainingStudio({
                 background: on ? "rgba(232,165,75,0.12)" : "transparent",
               }}
             >
-              <p className="text-xs font-semibold">{g.label}</p>
+              <p className="text-xs font-semibold">{g.name}</p>
               <p className="text-[10px] text-[color:var(--muted)]">
-                {g.description}
+                {typeof g.trackCount === "number"
+                  ? `${g.trackCount} track${g.trackCount === 1 ? "" : "s"}`
+                  : "Library"}
               </p>
             </button>
           );
@@ -473,7 +531,7 @@ export function MusicTrainingStudio({
               className="field !py-2 flex-1 text-sm"
               value={sourceQ}
               onChange={(e) => setSourceQ(e.target.value)}
-              placeholder="Search: epic, chill..."
+              placeholder="Search library tracks…"
             />
             <button
               type="button"

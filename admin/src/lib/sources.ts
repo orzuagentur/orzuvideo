@@ -292,24 +292,6 @@ export const SOURCES: SourceEntry[] = [
     envKeys: [],
     status: "infra",
   },
-  {
-    id: "jamendo",
-    name: "Jamendo",
-    tagline: "Legacy stock music API",
-    category: "legacy",
-    categoryLabel: "Legacy",
-    website: "https://developer.jamendo.com",
-    usedIn: ["Deprecated"],
-    purpose:
-      "Previously used for stock music previews. Replaced by the platform R2 music library.",
-    details: [
-      "Worker jamendo module is a compatibility shim.",
-      "JAMENDO_CLIENT_ID may still appear in env examples but is not required for new renders.",
-      "Keep only if you still have old bookmarks that point at Jamendo URLs.",
-    ],
-    envKeys: ["JAMENDO_CLIENT_ID"],
-    status: "legacy",
-  },
 ];
 
 export function getSource(id: string): SourceEntry | undefined {

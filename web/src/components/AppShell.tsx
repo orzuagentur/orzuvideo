@@ -25,10 +25,11 @@ type NavItem = {
 };
 
 const NAV: NavItem[] = [
+  { href: "/dashboard", label: "Home", exact: true },
   { href: "/dashboard/creators", label: "For creators" },
   { href: "/dashboard/clipping", label: "AI Clipping" },
   { href: "/dashboard/content", label: "Creativity" },
-  { href: "/dashboard/favorites", label: "Favorites" },
+  { href: "/dashboard/favorites", label: "Library" },
 ];
 
 type ChannelsCtx = {
@@ -114,7 +115,7 @@ export function YouTubeChannelsButton({
         }}
       >
         <YouTubeIcon />
-        <span className="whitespace-nowrap">YouTube Channels</span>
+        <span className="whitespace-nowrap">YouTube channel</span>
         <TinyChevron open={menuOpen} />
       </button>
       <ChannelsMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
@@ -225,8 +226,6 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const isCreators = pathname.startsWith("/dashboard/creators");
-  // For creators owns the toolbar row (YouTube + search)
   const isEditor = pathname.startsWith("/dashboard/editor");
   const ctx = { menuOpen, setMenuOpen };
 
@@ -251,7 +250,7 @@ export function AppShell({
             {/* Tall band so section links sit midway between top of screen and search */}
             <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
               <Link
-                href="/dashboard/content"
+                href="/dashboard"
                 className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.9rem] tracking-[0.03em] md:text-[2.15rem] md:tracking-[0.04em]"
                 style={{ fontWeight: 800, transform: "scaleY(1.12)" }}
               >
@@ -290,12 +289,7 @@ export function AppShell({
               </div>
             </div>
 
-            {/* For creators: YouTube lives in sticky toolbar next to search */}
-            {!isCreators && (
-              <div className="flex items-center gap-3 px-4 pb-3 md:px-6">
-                <YouTubeChannelsButton />
-              </div>
-            )}
+            {/* YouTube connect lives on Home */}
           </header>
 
           <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">

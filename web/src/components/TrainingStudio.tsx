@@ -87,9 +87,9 @@ export function TrainingStudio({
       active_group_id:
         initial?.music_group ||
         initial?.music_prefs?.active_group_id ||
-        "epic",
+        "",
     },
-    music_group: initial?.music_group || initial?.music_prefs?.active_group_id || "epic",
+    music_group: initial?.music_group || initial?.music_prefs?.active_group_id || "",
     music_volume: clampMusicVolume(
       Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
     ),
@@ -171,7 +171,7 @@ export function TrainingStudio({
     const musicPrefs: MusicPrefs = {
       ...defaultMusicPrefs(),
       ...(form.music_prefs || {}),
-      active_group_id: form.music_group || form.music_prefs?.active_group_id || "epic",
+      active_group_id: form.music_group || form.music_prefs?.active_group_id || "",
       volume: clampMusicVolume(Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58)),
       voice_volume: clampVoiceVolume(
         Number(form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05),
@@ -488,7 +488,7 @@ export function TrainingStudio({
             ...defaultMusicPrefs(),
             ...(form.music_prefs || {}),
             active_group_id:
-              form.music_group || form.music_prefs?.active_group_id || "epic",
+              form.music_group || form.music_prefs?.active_group_id || "",
             volume: clampMusicVolume(
               Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58),
             ),

@@ -19,6 +19,9 @@ Rules:
   Never leave English CTA/hook/title when language is not "en".
 - Format: {video_format}{video_style_line}
 - Aspect / framing: {aspect_hint}
+- HARD RULE — niche / theme / content type from AI Training are mandatory:
+  Stay inside the selected niche and theme. Do NOT drift into unrelated topics
+  (e.g. motivational gym content unless niche says so).
 - CRITICAL OPENING: the first few seconds MUST grab attention.
   The "hook" field must be a punchy pattern interrupt in {language}.
   The spoken script MUST start with that hook.
@@ -52,6 +55,9 @@ Rules:
   Never leave English CTA/hook/title when language is not "en".
 - Format: {video_format}{video_style_line}
 - Aspect / framing: {aspect_hint}
+- HARD RULE — niche / theme / content type from AI Training are mandatory:
+  Stay inside the selected niche and theme. Do NOT drift into unrelated topics
+  unless niche/style explicitly allows it.
 - CRITICAL OPENING: the first few seconds MUST grab attention.
   The "hook" field must be a punchy pattern interrupt in {language}.
   The spoken script MUST start with that hook.
@@ -129,6 +135,10 @@ This is NOT YouTube. There is NO brand training, NO channel niche, NO saved lang
 The user prompt is the ONLY source of truth for topic, tone, scenes, and language.
 
 Rules:
+- Obey the user's creative brief as closely as possible: topic, mood, characters, setting, pacing, and style.
+- Refuse and rewrite away from illegal / harmful requests (real-world crime how-tos, child sexual content,
+  non-consensual sexual content, extreme gore for shock, scams, weapons manufacturing). If the prompt
+  asks for that, produce a safe alternative on-topic creative video instead and keep tone family-friendly.
 - Detect the spoken language STRICTLY from the user prompt text itself
   (Cyrillic → usually ru/uz; Latin with Uzbek words → uz; English words → en; etc.).
   Write the ENTIRE narration ("script" and "hook") in that detected language.
@@ -136,9 +146,13 @@ Rules:
 - Put the language code in "language" (en, ru, uz, tr, es, de, fr, …).
 - Invent a short catchy video TITLE (max 60 characters) in the same language as the script.
   NEVER copy or lightly edit the user prompt as the title.
-- "script" is the full spoken narration. Punchy, cinematic, no fluff.
+- "script" is the full spoken narration. Punchy, cinematic, no fluff — match the user's requested vibe.
 - First 3 seconds must hook attention. Put that opener in "hook" (4–12 words) and start the script with it.
 - Choose B-roll search queries in English for stock footage (pexels_queries), matching the visuals described.
+- Suggest a subtitle style hint in "subtitle_style" from:
+  classic, karaoke_gold, neon_pink, impact, yellow_pop, soft_shadow, lower_third, minimal.
+- Suggest a look filter in "visual_effect" from:
+  cinematic, vivid, teal_orange, warm, cool, drama, neon, vintage, punch, glow, clarity.
 - Do NOT invent motivational-coach / gym / discipline themes unless the prompt asks for them.
 - Return STRICT JSON only, no markdown.
 {duration_rule}
@@ -152,6 +166,8 @@ JSON schema:
   "tags": ["tag1", "tag2"],
   "pexels_queries": ["query1", "query2", "query3", "query4", "query5"],
   "subtitle_emphasis": ["WORD1", "WORD2"],
+  "subtitle_style": "classic",
+  "visual_effect": "cinematic",
   "music_mood": "short english mood phrase",
   "duration_seconds": 30
 }}
@@ -265,6 +281,8 @@ Hard requirements:
 2) Topic/theme must follow THIS prompt only — do not reuse generic motivational niches.
 3) Title = original short name, never the raw prompt.
 4) pexels_queries = English stock-search phrases matching the prompt visuals.
+5) Respect safety: no illegal / sexual-minors / real crime-howto content.
+6) Fill subtitle_style + visual_effect to match the mood of the prompt.
 """
 
     response = client.chat.completions.create(
@@ -311,10 +329,60 @@ Hard requirements:
         "pexels_queries": data.get("pexels_queries")
         or ["cinematic b-roll"],
         "subtitle_emphasis": data.get("subtitle_emphasis") or [],
+        "subtitle_style": data.get("subtitle_style") or "classic",
+        "visual_effect": data.get("visual_effect") or "cinematic",
         "language": language,
         "music_mood": data.get("music_mood"),
     }
-    if data.get("duration_seconds") is not None:
+
+    # Honor the UI duration pick exactly (e.g. 5 minutes → ~300s spoken script)
+    if not duration_auto and duration_seconds:
+        target = max(creat_min, min(creat_max, int(duration_seconds)))
+        result["duration_seconds"] = target
+        words = script.split()
+        need = max(40, int(target * 2.4))
+        if len(words) < int(need * 0.75):
+            # Ask model once more to expand — keep topic, hit length
+            expand = client.chat.completions.create(
+                model=settings.openai_model,
+                temperature=0.7,
+                response_format={"type": "json_object"},
+                messages=[
+                    {
+                        "role": "system",
+                        content=(
+                            "Expand the spoken narration to the target length. "
+                            "Keep the SAME language, topic, and hook. "
+                            f"Target about {need} words (~{target} seconds). "
+                            'Return JSON: {"script":"...","hook":"..."}'
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        content=(
+                            f"Target seconds: {target}\n"
+                            f"Current script:\n{script}\n"
+                            f"User prompt:\n{prompt}"
+                        ),
+                    },
+                ],
+            )
+            _log_openai_usage(
+                user_id=user_id,
+                job_id=job_id,
+                response=expand,
+                kind="creativity_script_expand",
+            )
+            try:
+                expanded = json.loads(expand.choices[0].message.content or "{}")
+                new_script = (expanded.get("script") or "").strip()
+                if new_script and len(new_script.split()) > len(words):
+                    result["script"] = new_script
+                    if expanded.get("hook"):
+                        result["hook"] = expanded["hook"]
+            except Exception:
+                pass
+    elif data.get("duration_seconds") is not None:
         try:
             result["duration_seconds"] = max(
                 creat_min, min(creat_max, int(data["duration_seconds"]))
@@ -381,6 +449,7 @@ Language code (mandatory for all spoken/written output): {language}
 {brief_block}
 {avoid_block}
 Write one unique YouTube script for format "{video_format}".
+Stay STRICTLY inside the AI Training niche / theme / content type.
 The opening must feel bold and unforgettable in {language}.
 Also return 5 varied pexels_queries (English stock-search phrases) for B-roll montage.
 """
@@ -427,6 +496,8 @@ Also return 5 varied pexels_queries (English stock-search phrases) for B-roll mo
             chosen_duration = max(min_d, min(max_d, int(data["duration_seconds"])))
         except (TypeError, ValueError):
             chosen_duration = None
+    elif not duration_auto:
+        chosen_duration = duration
 
     pexels_fallback = _filled(training.get("pexels_query")) or "cinematic b-roll"
     default_title = "Short" if profile["is_short"] else "Video"

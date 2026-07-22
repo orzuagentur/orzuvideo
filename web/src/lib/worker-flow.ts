@@ -205,7 +205,7 @@ export const FLOW_NODES: FlowNodeDef[] = [
     col: 1,
     row: 4,
     title: "FFmpeg professional montage",
-    how: "Normalizes clips to 1080×1920, applies motion presets (punch, push, drift…), stitches with a transition library (wipe, slide, circle, dissolve…), mixes audio, burns karaoke ASS + 3s hook headline.",
+    how: "Normalizes every clip to locked CFR/timebase (fixes xfade mismatches), applies CapCut-style motions (12+) and grades (30+), stitches with 40+ xfade transitions, mixes audio, burns karaoke ASS (10 styles) + optional title overlay.",
     connects: ["Input: clips + voice + music", "Output: short_final.mp4"],
     needs: ["FFmpeg on PATH", "Worker machine"],
     tips: ["This is why Vercel alone cannot finish jobs"],
