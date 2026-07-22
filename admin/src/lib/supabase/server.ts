@@ -84,19 +84,33 @@ export async function requireAdminApi(): Promise<NextResponse | null> {
 /**
  * Service-role client for admin APIs, scoped so auth.getUser() returns
  * the signed-in admin (for music/media library ownership).
+ * Keep the real auth object — replacing it breaks getSession and other methods.
  */
 export async function createClient() {
   const admin = await getAdminUser();
   const sb = createServiceClient();
 
-  return Object.assign(sb, {
-    auth: {
-      getUser: async () => ({
-        data: {
-          user: admin ? ({ id: admin.id } as { id: string }) : null,
+  const getUser = async () => {
+    if (!admin) {
+      return { data: { user: null }, error: null };
+    }
+    return {
+      data: {
+        user: {
+          id: admin.id,
+          email: admin.email ?? undefined,
+          app_metadata: {},
+          user_metadata: {},
+          aud: "authenticated",
+          created_at: "",
         },
-        error: null,
-      }),
-    },
-  });
+      },
+      error: null,
+    };
+  };
+
+  // Override only getUser; leave getSession / signOut / etc. intact.
+  (sb.auth as { getUser: typeof getUser }).getUser = getUser;
+
+  return sb;
 }
