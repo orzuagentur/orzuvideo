@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { publicObjectUrl, r2Configured } from "@/lib/r2";
+import { objectSizeBytes, publicObjectUrl, r2Configured } from "@/lib/r2";
 import { MEDIA_BUCKET } from "@/lib/storage";
 import { SUBTITLE_STYLE_IDS } from "@/lib/editor-catalog";
 
@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 const ASPECTS = new Set(["9:16", "16:9", "1:1"]);
 const DURATIONS = new Set([15, 30, 45, 60]);
 const MAX_SOURCES = 6;
+const MAX_SOURCE_BYTES = 500 * 1024 * 1024;
 
 const PEXELS_HOSTS = [
   "videos.pexels.com",
@@ -151,13 +152,28 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (!url && storage_path) {
+    if (storage_path) {
       if (!r2Configured()) {
         return NextResponse.json(
           { error: "Cloudflare R2 is not configured" },
           { status: 503 },
         );
       }
+      const size = await objectSizeBytes(storage_path);
+      if (size == null || size <= 512) {
+        return NextResponse.json(
+          { error: "Uploaded source file was not found in R2" },
+          { status: 400 },
+        );
+      }
+      if (size > MAX_SOURCE_BYTES) {
+        return NextResponse.json(
+          { error: "Source file too large (max 500 MB)" },
+          { status: 400 },
+        );
+      }
+    }
+    if (!url && storage_path) {
       try {
         url = publicObjectUrl(storage_path);
       } catch (e) {

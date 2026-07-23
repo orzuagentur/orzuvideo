@@ -125,6 +125,35 @@ def _download_job_video(url: str, dest: Path) -> Path:
     return dest
 
 
+def _cleanup_clipping_sources(user_id: str, job_id: str, sources: object) -> None:
+    """Delete device-uploaded source files after clipping succeeds or fails."""
+    if not r2_configured():
+        return
+    if not isinstance(sources, list):
+        sources = []
+    for src in sources:
+        if not isinstance(src, dict):
+            continue
+        if str(src.get("kind") or "").lower() != "device":
+            continue
+        storage_path = str(src.get("storage_path") or "").strip()
+        if not storage_path:
+            continue
+        try:
+            delete_object(storage_path)
+            print(f"[CLIPPING] deleted R2 source {storage_path}")
+        except Exception as exc:
+            print(f"[CLIPPING] source cleanup skipped: {exc}")
+
+    try:
+        folder = f"{user_id}/clipping/{job_id}"
+        n = delete_prefix(folder)
+        if n:
+            print(f"[CLIPPING] cleared R2 folder {folder} ({n} files)")
+    except Exception as exc:
+        print(f"[CLIPPING] folder cleanup skipped: {exc}")
+
+
 def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
     """One or more source videos → short viral cut (no YouTube / no AI Training)."""
     job_id = job["id"]
@@ -213,7 +242,11 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         words: list = []
         audio_full = work / f"source_{i}_audio.mp3"
         try:
-            extracted = clip_pipe.extract_audio(local, audio_full)
+            extracted = clip_pipe.extract_audio(
+                local,
+                audio_full,
+                duration=min(source_dur, 900.0),
+            )
             if extracted is None:
                 print(f"[CLIPPING] source {i} has no audio; skip transcription")
             else:
@@ -646,6 +679,17 @@ def _process_reedit_job(job: dict, *, sb, work: Path) -> None:
 
 
 def process_job(job: dict) -> None:
+    tokens = db.enter_job_context(
+        job.get("worker_run_id"),
+        worker=job.get("worker_id"),
+    )
+    try:
+        return _process_job(job)
+    finally:
+        db.reset_job_context(tokens)
+
+
+def _process_job(job: dict) -> None:
     sb = db.get_supabase()
     job_id = job["id"]
     user_id = job["user_id"]
@@ -665,6 +709,9 @@ def process_job(job: dict) -> None:
                 error_message=f"{exc}\n{traceback.format_exc()[-1500:]}",
             )
             raise
+        finally:
+            if not job.get("keep_temp"):
+                shutil.rmtree(work, ignore_errors=True)
         return
 
     if _is_clipping_job(meta0):
@@ -677,7 +724,22 @@ def process_job(job: dict) -> None:
                 status="failed",
                 error_message=f"{exc}\n{traceback.format_exc()[-1500:]}",
             )
+            _cleanup_clipping_sources(
+                user_id,
+                job_id,
+                meta0.get("sources")
+                or [
+                    {
+                        "kind": "device",
+                        "storage_path": meta0.get("source_storage_path")
+                        or job.get("storage_path"),
+                    }
+                ],
+            )
             raise
+        finally:
+            if not job.get("keep_temp"):
+                shutil.rmtree(work, ignore_errors=True)
         return
 
     is_creativity = _is_creativity_job(job, meta0)
@@ -791,42 +853,82 @@ def process_job(job: dict) -> None:
                 "used_ai_training": True,
             }
 
-        profile = db.get_profile(sb, user_id)
+        profile = db.get_youtube_profile(
+            sb,
+            user_id,
+            youtube_channel_id=channel_id,
+        )
         if publish and (not profile or not profile.get("youtube_connected")):
             raise RuntimeError("YouTube is not connected.")
 
         # Publish-only path: already-rendered draft
-        if meta0.get("publish_existing") and job.get("preview_url"):
-            db.update_job(sb, job_id, status="uploading")
+        has_existing_video = bool(
+            job.get("preview_url")
+            or job.get("video_path")
+            or job.get("storage_path")
+            or meta0.get("storage_path")
+        )
+        if meta0.get("publish_existing") and has_existing_video:
+            db.update_job(
+                sb,
+                job_id,
+                status="uploading",
+                youtube_upload_started_at=datetime.now(timezone.utc).isoformat(),
+            )
             if not profile or not profile.get("youtube_connected"):
                 raise RuntimeError("YouTube is not connected.")
-            # Prefer local file if still present, else download preview
+            # Prefer local file, then R2 object, then preview URL.
             local = Path(job.get("video_path") or "")
             video_file = local if local.exists() else (work / "from_preview.mp4")
             if not local.exists():
-                import httpx
+                storage_path = str(
+                    job.get("storage_path") or meta0.get("storage_path") or ""
+                ).strip()
+                storage_bucket = str(
+                    job.get("storage_bucket")
+                    or meta0.get("storage_bucket")
+                    or media_bucket()
+                ).strip()
+                if storage_path and r2_configured():
+                    download_object(
+                        storage_path,
+                        video_file,
+                        bucket=storage_bucket if storage_bucket else None,
+                    )
+                else:
+                    preview_url = str(job.get("preview_url") or "").strip()
+                    if not preview_url:
+                        raise RuntimeError(
+                            "Existing draft file missing locally and no R2/preview URL available"
+                        )
+                    import httpx
 
-                with httpx.Client(timeout=180.0, follow_redirects=True) as client:
-                    r = client.get(job["preview_url"])
-                    r.raise_for_status()
-                    video_file.write_bytes(r.content)
+                    with httpx.Client(timeout=180.0, follow_redirects=True) as client:
+                        r = client.get(preview_url)
+                        r.raise_for_status()
+                        video_file.write_bytes(r.content)
             yt = upload_short(
                 profile,
                 video_file,
                 title=job.get("title") or "Short",
                 description=job.get("description") or "",
                 tags=job.get("tags") or ["shorts"],
+                expected_channel_id=channel_id,
             )
             if yt.get("access_token"):
-                sb.table("profiles").update(
-                    {"youtube_access_token": yt["access_token"]}
-                ).eq("id", user_id).execute()
+                db.update_youtube_access_token(
+                    sb,
+                    user_id,
+                    yt["access_token"],
+                    youtube_channel_id=channel_id,
+                )
             db.update_job(
                 sb,
                 job_id,
                 status="published",
                 youtube_video_id=yt["youtube_video_id"],
                 youtube_url=yt["youtube_url"],
+                youtube_upload_finished_at=datetime.now(timezone.utc).isoformat(),
                 completed_at=datetime.now(timezone.utc).isoformat(),
             )
             db.record_published(
@@ -1009,6 +1111,13 @@ def process_job(job: dict) -> None:
             work / "clips",
             count=clip_count,
             exclude_ids=used_pexels,
+            orientation=(
+                "landscape"
+                if aspect == "16:9"
+                else "square"
+                if aspect == "1:1"
+                else "portrait"
+            ),
         )
         for pid in pexels_ids:
             db.record_media_usage(
@@ -1199,7 +1308,12 @@ def process_job(job: dict) -> None:
             return
 
         # 6) Publish to YouTube
-        db.update_job(sb, job_id, status="uploading")
+        db.update_job(
+            sb,
+            job_id,
+            status="uploading",
+            youtube_upload_started_at=datetime.now(timezone.utc).isoformat(),
+        )
         yt = upload_short(
             profile,
             out_video,
@@ -1207,12 +1321,16 @@ def process_job(job: dict) -> None:
             description=description,
             tags=script_data["tags"],
             thumbnail_path=thumb_local if thumb_local and thumb_local.exists() else None,
+            expected_channel_id=channel_id,
         )
 
         if yt.get("access_token"):
-            sb.table("profiles").update(
-                {"youtube_access_token": yt["access_token"]}
-            ).eq("id", user_id).execute()
+            db.update_youtube_access_token(
+                sb,
+                user_id,
+                yt["access_token"],
+                youtube_channel_id=channel_id,
+            )
 
         db.update_job(
             sb,
@@ -1220,6 +1338,7 @@ def process_job(job: dict) -> None:
             status="published",
             youtube_video_id=yt["youtube_video_id"],
             youtube_url=yt["youtube_url"],
+            youtube_upload_finished_at=datetime.now(timezone.utc).isoformat(),
             completed_at=datetime.now(timezone.utc).isoformat(),
         )
         db.record_published(
@@ -1252,17 +1371,16 @@ def process_job(job: dict) -> None:
         )
         raise
     finally:
-        if job.get("keep_temp"):
-            return
-        try:
-            current = (
-                sb.table("video_jobs").select("status").eq("id", job_id).limit(1).execute()
-            )
-            # Keep drafts locally for a bit; wipe only after YouTube publish
-            if current.data and current.data[0]["status"] == "published":
-                shutil.rmtree(work, ignore_errors=True)
-        except Exception:
-            pass
+        if not job.get("keep_temp"):
+            try:
+                current = (
+                    sb.table("video_jobs").select("status").eq("id", job_id).limit(1).execute()
+                )
+                # Keep drafts locally for a bit; wipe only after YouTube publish
+                if current.data and current.data[0]["status"] == "published":
+                    shutil.rmtree(work, ignore_errors=True)
+            except Exception:
+                pass
 
 
 def process_next_job() -> bool:

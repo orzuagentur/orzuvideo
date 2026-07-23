@@ -6,8 +6,11 @@
  *   node admin/scripts/set-admin.mjs --id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
  *   node admin/scripts/set-admin.mjs --revoke you@example.com
  */
-const fs = require("fs");
-const path = require("path");
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function loadEnv(file) {
   const raw = fs.readFileSync(file, "utf8");

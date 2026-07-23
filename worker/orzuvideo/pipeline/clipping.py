@@ -26,7 +26,12 @@ def _escape_ass_path(path: Path) -> str:
     return p.replace(":", "\\:").replace("'", r"\'")
 
 
-def extract_audio(source: Path, out: Path) -> Path | None:
+def extract_audio(
+    source: Path,
+    out: Path,
+    *,
+    duration: float | None = None,
+) -> Path | None:
     """
     Extract mono MP3 for Whisper.
     Returns None when the source has no audio stream (common for silent stock clips).
@@ -35,22 +40,23 @@ def extract_audio(source: Path, out: Path) -> Path | None:
         print(f"[CLIPPING] no audio stream in {source.name}; skip extract")
         return None
     out.parent.mkdir(parents=True, exist_ok=True)
-    run_ffmpeg(
-        [
-            "-i",
-            str(source),
-            "-vn",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-c:a",
-            "libmp3lame",
-            "-q:a",
-            "4",
-            str(out),
-        ]
-    )
+    args = [
+        "-i",
+        str(source),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "libmp3lame",
+        "-q:a",
+        "4",
+    ]
+    if duration is not None:
+        args.extend(["-t", f"{max(0.1, float(duration)):.3f}"])
+    args.append(str(out))
+    run_ffmpeg(args)
     return out
 
 
@@ -646,4 +652,3 @@ def mix_clip_music(
         music_volume_body=0.28,
         voice_volume=1.08,
     )
-

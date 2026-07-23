@@ -74,6 +74,12 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    return NextResponse.json(
+      { error: "contentLength is required" },
+      { status: 400 },
+    );
+  }
   if (contentLength > MAX_BYTES) {
     return NextResponse.json(
       { error: "File too large (max 500 MB)" },

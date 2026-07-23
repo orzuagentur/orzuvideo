@@ -30,7 +30,7 @@ def ffprobe_duration(path: Path) -> float:
         "json",
         str(path),
     ]
-    out = subprocess.check_output(cmd, text=True)
+    out = subprocess.check_output(cmd, text=True, timeout=30)
     data = json.loads(out)
     return float(data["format"]["duration"])
 
@@ -50,7 +50,12 @@ def has_audio_stream(path: Path) -> bool:
         str(path),
     ]
     try:
-        out = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT).strip()
+        out = subprocess.check_output(
+            cmd,
+            text=True,
+            stderr=subprocess.STDOUT,
+            timeout=30,
+        ).strip()
         return bool(out)
     except Exception:
         return False
@@ -103,7 +108,12 @@ def _ffmpeg_error_tip(stderr: str, stdout: str) -> str:
 def run_ffmpeg(args: list[str]) -> None:
     # hide_banner + error loglevel → short, readable failures (not the configure dump)
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=settings.ffmpeg_timeout_sec,
+    )
     if proc.returncode != 0:
         tip = _ffmpeg_error_tip(proc.stderr or "", proc.stdout or "")
         raise RuntimeError(f"ffmpeg failed (code {proc.returncode}):\n{tip}")

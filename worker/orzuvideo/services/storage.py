@@ -91,7 +91,12 @@ def ensure_bucket(*_args: Any, **_kwargs: Any) -> None:
 
 def _run_ffmpeg(args: list[str]) -> None:
     cmd = ["ffmpeg", "-y", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=settings.ffmpeg_timeout_sec,
+    )
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg compress failed:\n{(proc.stderr or '')[-2000:]}")
 
@@ -254,9 +259,15 @@ def upload_public_file(
             f"File exceeds storage limit ({size} > {MAX_PREVIEW_BYTES} bytes): {upload_path}"
         )
 
-    data = upload_path.read_bytes()
+    client = get_r2_client()
     print(f"Uploading {size} bytes → R2 {bkt}/{key}")
-    return upload_bytes(key=key, data=data, content_type=content_type, bucket=bkt)
+    client.upload_file(
+        str(upload_path),
+        bkt,
+        key,
+        ExtraArgs={"ContentType": content_type},
+    )
+    return StoredObject(bucket=bkt, path=key, public_url=public_object_url(key))
 
 
 def upload_preview(

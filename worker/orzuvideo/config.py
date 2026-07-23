@@ -39,6 +39,7 @@ class Settings:
     r2_endpoint: str = os.getenv("R2_ENDPOINT", "")
     r2_public_base_url: str = os.getenv("R2_PUBLIC_BASE_URL", "")
     r2_region: str = os.getenv("R2_REGION", "auto")
+    ffmpeg_timeout_sec: int = int(os.getenv("FFMPEG_TIMEOUT_SEC", "3600"))
     output_width: int = 1080
     output_height: int = 1920
     fps: int = 30

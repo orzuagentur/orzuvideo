@@ -177,6 +177,8 @@ def upload_short(
     description: str,
     tags: list[str],
     thumbnail_path: Path | None = None,
+    expected_channel_id: str | None = None,
+    privacy_status: str = "public",
 ) -> dict[str, str]:
     youtube, creds = youtube_client(profile)
 
@@ -188,7 +190,7 @@ def upload_short(
             "categoryId": "22",
         },
         "status": {
-            "privacyStatus": "public",
+            "privacyStatus": privacy_status,
             "selfDeclaredMadeForKids": False,
         },
     }
@@ -197,10 +199,26 @@ def upload_short(
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
     response = None
     while response is None:
-        status, response = request.next_chunk()
+        status, response = request.next_chunk(num_retries=3)
         _ = status
 
     video_id = response["id"]
+    uploaded_channel_id = str(
+        ((response.get("snippet") or {}).get("channelId") or "")
+    ).strip()
+    if expected_channel_id and uploaded_channel_id and uploaded_channel_id != expected_channel_id:
+        try:
+            youtube.videos().delete(id=video_id).execute()
+            print(
+                f"YouTube upload {video_id} deleted: channel mismatch "
+                f"{uploaded_channel_id} != {expected_channel_id}"
+            )
+        except Exception as exc:
+            print(f"YouTube cleanup after channel mismatch failed: {exc}")
+        raise RuntimeError(
+            "YouTube upload landed on the wrong channel "
+            f"({uploaded_channel_id} != {expected_channel_id})"
+        )
 
     if thumbnail_path and thumbnail_path.exists():
         try:
@@ -216,6 +234,7 @@ def upload_short(
     return {
         "youtube_video_id": video_id,
         "youtube_url": f"https://youtube.com/shorts/{video_id}",
+        "youtube_channel_id": uploaded_channel_id,
         "access_token": creds.token or "",
     }
 

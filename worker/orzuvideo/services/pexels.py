@@ -8,14 +8,22 @@ import httpx
 from orzuvideo.config import settings
 
 
-def search_videos(query: str, per_page: int = 12, page: int = 1) -> list[dict]:
+def search_videos(
+    query: str,
+    per_page: int = 12,
+    page: int = 1,
+    *,
+    orientation: str = "portrait",
+) -> list[dict]:
     if not settings.pexels_api_key:
         raise RuntimeError("PEXELS_API_KEY is required")
 
     headers = {"Authorization": settings.pexels_api_key}
     params = {
         "query": query,
-        "orientation": "portrait",
+        "orientation": orientation
+        if orientation in {"portrait", "landscape", "square"}
+        else "portrait",
         "size": "medium",
         "per_page": per_page,
         "page": page,
@@ -30,14 +38,15 @@ def search_videos(query: str, per_page: int = 12, page: int = 1) -> list[dict]:
         return resp.json().get("videos") or []
 
 
-def _best_file(video: dict) -> str | None:
+def _best_file(video: dict, *, orientation: str = "portrait") -> str | None:
     files = video.get("video_files") or []
+    target_w, target_h = (1920, 1080) if orientation == "landscape" else (1080, 1920)
     ranked = sorted(
         files,
         key=lambda f: (
             0 if (f.get("width") or 0) >= 720 else 1,
-            abs((f.get("height") or 0) - 1920),
-            abs((f.get("width") or 0) - 1080),
+            abs((f.get("width") or 0) - target_w),
+            abs((f.get("height") or 0) - target_h),
         ),
     )
     for f in ranked:
@@ -53,6 +62,7 @@ def download_stock_clips(
     count: int = 3,
     *,
     exclude_ids: set[str] | set[int] | None = None,
+    orientation: str = "portrait",
 ) -> tuple[list[Path], list[str]]:
     """
     Download unique Pexels clips, skipping IDs already used on prior videos.
@@ -85,7 +95,12 @@ def download_stock_clips(
             if len(clips) >= count:
                 break
             try:
-                videos = search_videos(query, per_page=30, page=page)
+                videos = search_videos(
+                    query,
+                    per_page=30,
+                    page=page,
+                    orientation=orientation,
+                )
             except Exception as exc:
                 print(f"Pexels search failed ({query} p{page}): {exc}")
                 continue
@@ -96,7 +111,7 @@ def download_stock_clips(
                 vid = str(video.get("id") or "")
                 if not vid or vid in seen_ids:
                     continue
-                link = _best_file(video)
+                link = _best_file(video, orientation=orientation)
                 if not link:
                     continue
                 seen_ids.add(vid)
@@ -116,7 +131,13 @@ def download_stock_clips(
         print(
             f"[PEXELS] no unused clips left (excluded={len(exclude_ids)}) — soft reuse"
         )
-        return download_stock_clips(queries, dest_dir, count=count, exclude_ids=None)
+        return download_stock_clips(
+            queries,
+            dest_dir,
+            count=count,
+            exclude_ids=None,
+            orientation=orientation,
+        )
 
     if not clips:
         raise RuntimeError(f"No fresh Pexels clips for queries: {queries}")

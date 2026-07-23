@@ -175,3 +175,51 @@ select.field option {
 .rise-delay {
   animation: rise 0.8s ease 0.12s both;
 }
+
+@keyframes landing-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-12px, 10px) scale(1.06);
+  }
+}
+
+.landing-glow {
+  animation: landing-glow 9s ease-in-out infinite;
+}
+
+.landing-rise {
+  animation: rise 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-rise-delay {
+  animation: rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+.landing-feature {
+  animation: rise 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-cta {
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.landing-cta:hover {
+  box-shadow: 0 14px 36px rgba(232,165,75,0.36);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-glow,
+  .landing-rise,
+  .landing-rise-delay,
+  .landing-feature {
+    animation: none !important;
+  }
+}

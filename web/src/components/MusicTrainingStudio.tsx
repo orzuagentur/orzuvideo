@@ -27,7 +27,7 @@ export function MusicTrainingStudio({
   voiceId = "",
   required = false,
 }: Props) {
-  const prefs = { ...defaultMusicPrefs(), ...value };
+  const prefs = useMemo(() => ({ ...defaultMusicPrefs(), ...value }), [value]);
   const { show: toast, notice } = useToast();
   const [genres, setGenres] = useState<LibraryGenre[]>([]);
   const [tracks, setTracks] = useState<MusicTrackRef[]>([]);

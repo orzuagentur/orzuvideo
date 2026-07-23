@@ -31,7 +31,7 @@ function todayInTz(timezone: string): {
   const parts = Object.fromEntries(
     fmt.formatToParts(new Date()).map((p) => [p.type, p.value]),
   );
-  let dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
   // Intl can return "24" for midnight — treat as 00:00 next calendar day edge
   let hour = parts.hour === "24" ? "00" : parts.hour;
   if (parts.hour === "24") {
@@ -115,7 +115,7 @@ function cronAuthorized(request: Request): boolean {
   // Vercel Cron always sends this header on scheduled invocations
   const isVercelCron = request.headers.get("x-vercel-cron") === "1";
   if (isVercelCron) return true;
-  if (!secret) return true;
+  if (!secret) return process.env.NODE_ENV !== "production";
   const auth = request.headers.get("authorization");
   return auth === `Bearer ${secret}`;
 }
@@ -234,12 +234,16 @@ export async function GET(request: Request) {
     }
 
     const slotKey = `${dateStr}T${matchedTime}`;
-    const { data: existing } = await sb
+    let existingQuery = sb
       .from("video_jobs")
       .select("id")
       .eq("user_id", schedule.user_id)
       .contains("metadata", { schedule_slot: slotKey })
       .limit(1);
+    existingQuery = schedule.youtube_channel_id
+      ? existingQuery.eq("youtube_channel_id", schedule.youtube_channel_id)
+      : existingQuery.is("youtube_channel_id", null);
+    const { data: existing } = await existingQuery;
     if (existing && existing.length) {
       skipped += 1;
       continue;

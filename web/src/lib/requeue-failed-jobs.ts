@@ -102,6 +102,10 @@ export async function requeueFailedJobs(
         status: "queued",
         error_message: null,
         scheduled_for: new Date().toISOString(),
+        worker_run_id: null,
+        worker_id: null,
+        claimed_at: null,
+        lease_expires_at: null,
         metadata: newMeta,
       })
       .eq("id", row.id)
@@ -125,7 +129,6 @@ const STUCK_STATUSES = [
   "generating_voice",
   "fetching_media",
   "editing",
-  "uploading",
 ] as const;
 
 /**
@@ -139,7 +142,7 @@ export async function requeueStuckJobs(
     limit?: number;
   },
 ): Promise<{ requeued: number; ids: string[] }> {
-  const staleMinutes = opts?.staleMinutes ?? 45;
+  const staleMinutes = opts?.staleMinutes ?? 180;
   const maxAttempts = opts?.maxAttempts ?? 3;
   const limit = opts?.limit ?? 10;
   const cutoff = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
@@ -178,6 +181,10 @@ export async function requeueStuckJobs(
         status: "queued",
         error_message: null,
         scheduled_for: new Date().toISOString(),
+        worker_run_id: null,
+        worker_id: null,
+        claimed_at: null,
+        lease_expires_at: null,
         metadata: newMeta,
       })
       .eq("id", row.id)

@@ -72,7 +72,6 @@ type AssetsCache = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __orzuPolyHavenAssets: AssetsCache | undefined;
 }
 

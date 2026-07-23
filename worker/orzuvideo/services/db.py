@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+import socket
+import uuid
+from contextvars import ContextVar, Token
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from supabase import Client, create_client
 
 from orzuvideo.config import settings
+
+WORKER_LEASE_SECONDS = int(os.getenv("WORKER_LEASE_SECONDS", "7200"))
+_CURRENT_RUN_ID: ContextVar[str | None] = ContextVar("worker_run_id", default=None)
+_CURRENT_WORKER_ID: ContextVar[str | None] = ContextVar("worker_id", default=None)
 
 
 def get_supabase() -> Client:
@@ -14,8 +22,55 @@ def get_supabase() -> Client:
     return create_client(settings.supabase_url, settings.supabase_service_key)
 
 
+def worker_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def enter_job_context(
+    run_id: str | None,
+    *,
+    worker: str | None = None,
+) -> tuple[Token[str | None], Token[str | None]]:
+    """Scope updates to the claimed run so stale workers cannot overwrite retries."""
+    return (
+        _CURRENT_RUN_ID.set(str(run_id) if run_id else None),
+        _CURRENT_WORKER_ID.set(worker or worker_id()),
+    )
+
+
+def reset_job_context(tokens: tuple[Token[str | None], Token[str | None]]) -> None:
+    run_token, worker_token = tokens
+    _CURRENT_RUN_ID.reset(run_token)
+    _CURRENT_WORKER_ID.reset(worker_token)
+
+
+def _lease_expires_at(seconds: int = WORKER_LEASE_SECONDS) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
 def claim_next_job(sb: Client) -> dict[str, Any] | None:
-    """Atomically pick the oldest queued job and mark it generating_script."""
+    """Atomically pick the oldest due queued job."""
+    wid = worker_id()
+    try:
+        result = sb.rpc(
+            "claim_next_video_job",
+            {
+                "p_worker_id": wid,
+                "p_lease_seconds": WORKER_LEASE_SECONDS,
+            },
+        ).execute()
+        rows = result.data or []
+        if rows:
+            return rows[0]
+        return None
+    except Exception as exc:
+        print(f"[QUEUE] RPC claim unavailable, using fallback claim: {exc}")
+
+    return _claim_next_job_fallback(sb, wid)
+
+
+def _claim_next_job_fallback(sb: Client, wid: str) -> dict[str, Any] | None:
+    """Best-effort claim for pre-migration databases."""
     now = datetime.now(timezone.utc).isoformat()
     result = (
         sb.table("video_jobs")
@@ -31,18 +86,39 @@ def claim_next_job(sb: Client) -> dict[str, Any] | None:
         return None
 
     job = rows[0]
-    updated = (
-        sb.table("video_jobs")
-        .update(
-            {
-                "status": "generating_script",
-                "attempt_count": (job.get("attempt_count") or 0) + 1,
-            }
+    run_id = str(uuid.uuid4())
+    fields = {
+        "status": "generating_script",
+        "attempt_count": (job.get("attempt_count") or 0) + 1,
+        "worker_run_id": run_id,
+        "worker_id": wid,
+        "claimed_at": now,
+        "lease_expires_at": _lease_expires_at(),
+        "error_message": None,
+    }
+    try:
+        updated = (
+            sb.table("video_jobs")
+            .update(fields)
+            .eq("id", job["id"])
+            .eq("status", "queued")
+            .execute()
         )
-        .eq("id", job["id"])
-        .eq("status", "queued")
-        .execute()
-    )
+    except Exception as exc:
+        print(f"[QUEUE] fallback claim without lease columns: {exc}")
+        updated = (
+            sb.table("video_jobs")
+            .update(
+                {
+                    "status": "generating_script",
+                    "attempt_count": (job.get("attempt_count") or 0) + 1,
+                }
+            )
+            .eq("id", job["id"])
+            .eq("status", "queued")
+            .execute()
+        )
+
     if not updated.data:
         return None
     return updated.data[0]
@@ -59,8 +135,6 @@ def requeue_failed_jobs(
     Auto-retry failed jobs (transient errors / worker blips).
     Skips jobs that already hit max attempts or were requeued too often.
     """
-    from datetime import timedelta
-
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)).isoformat()
     try:
         result = (
@@ -112,6 +186,10 @@ def requeue_failed_jobs(
                         "status": "queued",
                         "error_message": None,
                         "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "worker_run_id": None,
+                        "worker_id": None,
+                        "claimed_at": None,
+                        "lease_expires_at": None,
                         "metadata": new_meta,
                     }
                 )
@@ -133,20 +211,19 @@ def requeue_failed_jobs(
 def requeue_stuck_jobs(
     sb: Client,
     *,
-    stale_minutes: int = 45,
+    stale_minutes: int = 180,
     max_attempts: int = 3,
     limit: int = 5,
 ) -> int:
     """Return mid-pipeline jobs that haven't progressed (worker crash) to queued."""
-    from datetime import timedelta
-
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
+    # Do not auto-requeue uploading. A worker crash after YouTube accepted a video
+    # but before DB update would otherwise publish duplicates on the next attempt.
     stuck_statuses = [
         "generating_script",
         "generating_voice",
         "fetching_media",
         "editing",
-        "uploading",
     ]
     try:
         result = (
@@ -186,6 +263,10 @@ def requeue_stuck_jobs(
                         "status": "queued",
                         "error_message": None,
                         "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "worker_run_id": None,
+                        "worker_id": None,
+                        "claimed_at": None,
+                        "lease_expires_at": None,
                         "metadata": new_meta,
                     }
                 )
@@ -206,7 +287,6 @@ def requeue_stuck_jobs(
 
 def beat_presence(sb: Client, *, working: bool = False) -> None:
     """Tell the dashboard the Python worker is alive."""
-    import socket
 
     try:
         sb.table("worker_presence").upsert(
@@ -217,6 +297,7 @@ def beat_presence(sb: Client, *, working: bool = False) -> None:
                 "meta": {
                     "poll_interval_sec": settings.poll_interval_sec,
                     "working": working,
+                    "worker_id": worker_id(),
                 },
             }
         ).execute()
@@ -225,7 +306,18 @@ def beat_presence(sb: Client, *, working: bool = False) -> None:
 
 
 def update_job(sb: Client, job_id: str, **fields: Any) -> None:
-    sb.table("video_jobs").update(fields).eq("id", job_id).execute()
+    fields = dict(fields)
+    run_id = _CURRENT_RUN_ID.get()
+    if run_id:
+        fields["lease_expires_at"] = _lease_expires_at()
+    q = sb.table("video_jobs").update(fields).eq("id", job_id)
+    if run_id:
+        q = q.eq("worker_run_id", run_id)
+    result = q.execute()
+    if run_id and not result.data:
+        raise RuntimeError(
+            f"Lost job lease for {job_id}; another worker/run owns this job now."
+        )
 
 
 def get_training(
@@ -267,6 +359,66 @@ def get_profile(sb: Client, user_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def get_youtube_profile(
+    sb: Client,
+    user_id: str,
+    *,
+    youtube_channel_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Profile-shaped YouTube auth bag, preferring the channel-scoped token row."""
+    profile = get_profile(sb, user_id)
+    if youtube_channel_id:
+        try:
+            result = (
+                sb.table("youtube_channels")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("channel_id", youtube_channel_id)
+                .limit(1)
+                .execute()
+            )
+            rows = result.data or []
+            if rows:
+                row = rows[0]
+                return {
+                    **(profile or {}),
+                    "youtube_connected": True,
+                    "youtube_channel_id": row.get("channel_id"),
+                    "youtube_channel_title": row.get("title"),
+                    "youtube_access_token": row.get("access_token")
+                    or (profile or {}).get("youtube_access_token"),
+                    "youtube_refresh_token": row.get("refresh_token")
+                    or (profile or {}).get("youtube_refresh_token"),
+                    "youtube_token_expires_at": row.get("token_expires_at")
+                    or (profile or {}).get("youtube_token_expires_at"),
+                }
+        except Exception as exc:
+            print(f"[YOUTUBE] channel auth lookup fallback: {exc}")
+    return profile
+
+
+def update_youtube_access_token(
+    sb: Client,
+    user_id: str,
+    access_token: str,
+    *,
+    youtube_channel_id: str | None = None,
+) -> None:
+    if youtube_channel_id:
+        try:
+            sb.table("youtube_channels").update({"access_token": access_token}).eq(
+                "user_id", user_id
+            ).eq("channel_id", youtube_channel_id).execute()
+        except Exception as exc:
+            print(f"[YOUTUBE] channel token update skipped: {exc}")
+    try:
+        sb.table("profiles").update({"youtube_access_token": access_token}).eq(
+            "id", user_id
+        ).execute()
+    except Exception as exc:
+        print(f"[YOUTUBE] profile token update skipped: {exc}")
+
+
 def record_published(
     sb: Client,
     *,
@@ -277,15 +429,32 @@ def record_published(
     title: str,
     script_text: str,
 ) -> None:
+    existing = None
+    if job_id:
+        try:
+            res = (
+                sb.table("published_videos")
+                .select("id")
+                .eq("job_id", job_id)
+                .limit(1)
+                .execute()
+            )
+            existing = (res.data or [None])[0]
+        except Exception:
+            existing = None
+    payload = {
+        "user_id": user_id,
+        "job_id": job_id,
+        "youtube_video_id": youtube_video_id,
+        "youtube_url": youtube_url,
+        "title": title,
+        "script_text": script_text,
+    }
+    if existing:
+        sb.table("published_videos").update(payload).eq("id", existing["id"]).execute()
+        return
     sb.table("published_videos").insert(
-        {
-            "user_id": user_id,
-            "job_id": job_id,
-            "youtube_video_id": youtube_video_id,
-            "youtube_url": youtube_url,
-            "title": title,
-            "script_text": script_text,
-        }
+        payload
     ).execute()
 
 

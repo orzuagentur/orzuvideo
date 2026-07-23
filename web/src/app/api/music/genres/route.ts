@@ -28,17 +28,6 @@ function slugify(name: string): string {
 }
 
 /** Remove old auto-seeded starter genres (Epic, Motivational, …). */
-async function purgeSeededGenres(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  userId: string,
-) {
-  await supabase
-    .from("music_genres")
-    .delete()
-    .eq("user_id", userId)
-    .in("slug", [...SEEDED_SLUGS]);
-}
-
 /** List shared platform genres with track count + total bytes. */
 export async function GET() {
   const supabase = await createClient();

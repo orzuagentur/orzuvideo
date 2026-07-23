@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     10,
     Math.max(1, Number(body.videos_per_day) || existing?.videos_per_day || 2),
   );
-  let normalizedTimes: string[] = times
+  const normalizedTimes: string[] = times
     .map((t: string) => {
       const [h, m] = String(t).trim().split(":");
       if (h == null) return "";
