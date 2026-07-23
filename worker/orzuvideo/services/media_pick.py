@@ -24,7 +24,19 @@ class LibraryTrack:
     genre: str = ""
 
 
-# LibraryTrack is the only music shape — Jamendo removed
+# Theme tokens help match niche / script to track mood+genre+title
+_THEME_HINTS: dict[str, list[str]] = {
+    "motivation": ["motivational", "epic", "uplift", "inspire", "power", "drive"],
+    "fitness": ["workout", "pump", "energy", "sport", "gym", "trap"],
+    "business": ["focus", "corporate", "ambition", "hustle", "modern"],
+    "mindset": ["calm", "deep", "piano", "reflect", "ambient"],
+    "lifestyle": ["chill", "luxury", "vibe", "smooth", "urban"],
+    "tech": ["electronic", "future", "synth", "digital", "cyber"],
+    "stoicism": ["orchestral", "epic", "solemn", "cinematic", "drama"],
+    "relationships": ["emotional", "soft", "warm", "romantic", "piano"],
+    "health": ["calm", "nature", "bright", "positive", "soft"],
+    "travel": ["adventure", "cinematic", "world", "discover", "uplift"],
+}
 
 
 def attribution_line(track: LibraryTrack | None) -> str:
@@ -61,7 +73,7 @@ def exclude_used_media(
         user_id,
         provider,
         days=9999,
-        limit=3000,
+        limit=5000,
         all_time=True,
     )
 
@@ -70,32 +82,63 @@ def _normalize(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
+def _theme_tokens(*parts: str) -> set[str]:
+    tokens: set[str] = set()
+    for part in parts:
+        n = _normalize(part)
+        if not n:
+            continue
+        for w in re.split(r"[^a-z0-9а-яё]+", n):
+            if len(w) > 2:
+                tokens.add(w)
+        for key, hints in _THEME_HINTS.items():
+            if key in n or any(h in n for h in hints[:2]):
+                tokens.update(hints)
+                tokens.add(key)
+    return tokens
+
+
 def _score_track(
     row: dict[str, Any],
     *,
     mood: str,
     genre_slug: str,
+    theme_tokens: set[str] | None = None,
 ) -> int:
     score = 0
     mood_n = _normalize(mood)
     row_mood = _normalize(str(row.get("mood") or ""))
+    title = _normalize(str(row.get("title") or ""))
+    artist = _normalize(str(row.get("artist") or ""))
     g = row.get("music_genres") or {}
     if isinstance(g, list):
         g = g[0] if g else {}
     slug = _normalize(str((g or {}).get("slug") or ""))
     name = _normalize(str((g or {}).get("name") or ""))
+    hay = f"{row_mood} {title} {artist} {slug} {name}"
 
     if genre_slug and (slug == genre_slug or name == genre_slug):
         score += 50
     if mood_n and row_mood:
         if mood_n == row_mood:
-            score += 40
+            score += 45
         elif mood_n in row_mood or row_mood in mood_n:
-            score += 25
+            score += 28
         else:
             for w in mood_n.split():
                 if len(w) > 2 and w in row_mood:
-                    score += 8
+                    score += 10
+    if mood_n:
+        for w in mood_n.split():
+            if len(w) > 2 and w in hay:
+                score += 6
+
+    for tok in theme_tokens or set():
+        if tok and tok in hay:
+            score += 12
+
+    # Slight jitter so close matches still diversify
+    score += random.randint(0, 4)
     return score
 
 
@@ -108,8 +151,9 @@ def pick_library_track(
     music_group: str | None = None,
     script_mood: str | None = None,
     default_mood: str = "cinematic",
+    theme_tokens: set[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Pick a track: preferred id (user or platform), else user library, else platform."""
+    """Pick best-matching unused track; diversify among top thematic matches."""
     ban = {str(x) for x in (exclude_ids or set())}
     preferred = [str(x) for x in (preferred_ids or []) if x and str(x) not in ban]
     select_cols = (
@@ -143,7 +187,7 @@ def pick_library_track(
                 sb.table("music_tracks")
                 .select(select_cols)
                 .order("created_at", desc=True)
-                .limit(200)
+                .limit(300)
             )
             if eq_user:
                 q = q.eq("user_id", user_id)
@@ -159,22 +203,20 @@ def pick_library_track(
     if not rows:
         rows = _list(eq_platform=True)
     if not rows:
-        # Legacy DBs without is_platform
+        # Soft fallback: allow previously used tracks if library exhausted
         try:
             result = (
                 sb.table("music_tracks")
-                .select(
-                    "id,user_id,title,artist,mood,duration_sec,storage_path,public_url,"
-                    "genre_id,music_genres(name,slug)"
-                )
-                .eq("user_id", user_id)
+                .select(select_cols)
+                .eq("is_platform", True)
                 .order("created_at", desc=True)
-                .limit(200)
+                .limit(300)
                 .execute()
             )
-            rows = [r for r in (result.data or []) if str(r.get("id")) not in ban]
+            rows = list(result.data or [])
+            print(f"[LIBRARY] reuse fallback — all tracks were used recently ({len(rows)})")
         except Exception as exc2:
-            print(f"[LIBRARY] legacy list failed: {exc2}")
+            print(f"[LIBRARY] fallback list failed: {exc2}")
             return None
 
     if not rows:
@@ -182,19 +224,35 @@ def pick_library_track(
 
     mood = _normalize(script_mood or default_mood)
     genre_slug = _normalize(music_group or "")
+    tokens = theme_tokens or set()
     ranked = sorted(
         rows,
-        key=lambda r: _score_track(r, mood=mood, genre_slug=genre_slug),
+        key=lambda r: _score_track(
+            r, mood=mood, genre_slug=genre_slug, theme_tokens=tokens
+        ),
         reverse=True,
     )
-    top = ranked[: max(3, min(8, len(ranked)))]
-    best_score = _score_track(top[0], mood=mood, genre_slug=genre_slug)
+    # Take a wider top band so music stays on-theme but not identical every time
+    top_n = max(5, min(12, len(ranked)))
+    top = ranked[:top_n]
+    best_score = _score_track(
+        top[0], mood=mood, genre_slug=genre_slug, theme_tokens=tokens
+    )
     pool = [
         r
         for r in top
-        if _score_track(r, mood=mood, genre_slug=genre_slug) >= max(0, best_score - 15)
+        if _score_track(r, mood=mood, genre_slug=genre_slug, theme_tokens=tokens)
+        >= max(0, best_score - 20)
     ]
-    return random.choice(pool or top)
+    # Weighted toward higher scores
+    weights = [
+        max(
+            1,
+            _score_track(r, mood=mood, genre_slug=genre_slug, theme_tokens=tokens),
+        )
+        for r in (pool or top)
+    ]
+    return random.choices(pool or top, weights=weights, k=1)[0]
 
 
 def fetch_background_music(
@@ -209,7 +267,7 @@ def fetch_background_music(
     script_mood: str | None = None,
     default_mood: str = "cinematic soundtrack",
 ) -> tuple[LibraryTrack | None, str | None]:
-    """Download a track from the shared platform library (R2) and record usage."""
+    """Download best thematic track from library; avoid tracks this user already used."""
     training = training or {}
     music_prefs = _parse_music_prefs(training)
     exclude = exclude_used_media(sb, user_id, "library")
@@ -240,15 +298,20 @@ def fetch_background_music(
         if tid:
             preferred_ids = [tid] + [p for p in preferred_ids if p != tid]
 
+    niche = str(training.get("niche") or "").strip()
+    style = str(training.get("style_prompt") or "").strip()
+    content = str(training.get("content_type") or "").strip()
     mood = (
         str(script_mood or "").strip()
         or str(training.get("music_mood") or "").strip()
+        or niche
         or default_mood
     )
+    theme_tokens = _theme_tokens(niche, content, style, mood, script_mood or "")
 
     print(
-        f"[MEDIA] library mood={mood!r} group={active_gid!r} "
-        f"exclude={len(exclude)} preferred={len(preferred_ids)}"
+        f"[MEDIA] library mood={mood!r} niche={niche!r} group={active_gid!r} "
+        f"exclude={len(exclude)} preferred={len(preferred_ids)} themes={len(theme_tokens)}"
     )
 
     row = pick_library_track(
@@ -259,6 +322,7 @@ def fetch_background_music(
         music_group=active_gid,
         script_mood=mood,
         default_mood=default_mood,
+        theme_tokens=theme_tokens,
     )
     if not row:
         print("[MEDIA] library empty — no background music")
@@ -332,6 +396,9 @@ def merge_optional_training(
         "music_volume",
         "voice_volume",
         "pexels_query",
+        "niche",
+        "style_prompt",
+        "subtitle_style",
     ):
         if row.get(key) is not None:
             merged[key] = row[key]

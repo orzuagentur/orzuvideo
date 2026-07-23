@@ -111,6 +111,13 @@ def download_stock_clips(
                 if len(clips) >= count:
                     break
 
+    if not clips and exclude_ids:
+        # Library exhausted for this user — soft reuse, still shuffled
+        print(
+            f"[PEXELS] no unused clips left (excluded={len(exclude_ids)}) — soft reuse"
+        )
+        return download_stock_clips(queries, dest_dir, count=count, exclude_ids=None)
+
     if not clips:
         raise RuntimeError(f"No fresh Pexels clips for queries: {queries}")
     return clips, used_ids

@@ -1,6 +1,5 @@
 "use client";
 
-import { YouTubeChannelsButton } from "@/components/AppShell";
 import {
   useCallback,
   useEffect,
@@ -325,13 +324,11 @@ export function CreatorsStudio() {
 
   return (
     <div className="space-y-4">
-      {/* Sticky toolbar — YouTube + search */}
+      {/* Sticky toolbar — search */}
       <form
         onSubmit={onSearch}
         className="sticky top-14 z-40 -mx-3 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-3 py-2.5 backdrop-blur-md sm:top-[5.75rem] sm:-mx-4 sm:px-4 sm:py-3 md:top-[6.25rem] md:-mx-6 md:px-6"
       >
-        <YouTubeChannelsButton />
-
         <div className="relative min-w-0 flex-1">
           <div className="absolute left-1.5 top-1/2 z-10 -translate-y-1/2" ref={typeRef}>
             <button
@@ -784,13 +781,13 @@ function AssetFullscreen({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <div className="relative flex min-h-[50vh] flex-1 items-center justify-center overflow-hidden bg-[#111] md:min-h-0">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain md:flex-row md:overflow-hidden">
+        <div className="relative flex h-[min(42vh,320px)] w-full shrink-0 items-center justify-center overflow-hidden bg-[#111] md:h-auto md:min-h-0 md:flex-1">
           {mode3d && panoramaUrl ? (
             <HdriSphereViewer imageUrl={panoramaUrl} />
           ) : mode3d && gltfUrl ? (
             <div
-              className="h-full w-full min-h-[360px] p-4"
+              className="h-full w-full min-h-[240px] p-4 md:min-h-[360px]"
               ref={(el) => {
                 if (!el) return;
                 el.innerHTML = "";
@@ -801,7 +798,7 @@ function AssetFullscreen({
                 mv.setAttribute("shadow-intensity", "1");
                 mv.style.width = "100%";
                 mv.style.height = "100%";
-                mv.style.minHeight = "360px";
+                mv.style.minHeight = "240px";
                 el.appendChild(mv);
               }}
             />
@@ -817,8 +814,8 @@ function AssetFullscreen({
           ) : null}
         </div>
 
-        <aside className="flex w-full shrink-0 flex-col border-t border-[color:var(--line)] md:w-[320px] md:border-l md:border-t-0">
-          <div className="border-b border-[color:var(--line)] p-3">
+        <aside className="flex w-full shrink-0 flex-col border-t border-[color:var(--line)] md:h-full md:w-[320px] md:overflow-hidden md:border-l md:border-t-0">
+          <div className="shrink-0 border-b border-[color:var(--line)] p-3">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
               Sides / maps
             </p>
@@ -878,7 +875,7 @@ function AssetFullscreen({
             </div>
           </div>
 
-          <div className="flex-1 space-y-3 overflow-y-auto p-4 text-sm">
+          <div className="space-y-3 p-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm md:min-h-0 md:flex-1 md:overflow-y-auto">
             {asset.description ? (
               <p className="text-[color:var(--muted)]">{asset.description}</p>
             ) : null}

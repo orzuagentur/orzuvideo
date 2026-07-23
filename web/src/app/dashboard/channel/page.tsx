@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
+import { ChannelStudioPage } from "@/components/ChannelStudioPage";
 
-/** Legacy URL — Home is the open active channel. */
+/** YouTube channel workspace — open from Home card or top/bottom nav. */
 export default function ChannelPage() {
-  redirect("/dashboard");
+  return <ChannelStudioPage />;
 }

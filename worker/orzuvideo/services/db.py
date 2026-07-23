@@ -48,6 +48,162 @@ def claim_next_job(sb: Client) -> dict[str, Any] | None:
     return updated.data[0]
 
 
+def requeue_failed_jobs(
+    sb: Client,
+    *,
+    max_attempts: int = 3,
+    cooldown_minutes: int = 15,
+    limit: int = 10,
+) -> int:
+    """
+    Auto-retry failed jobs (transient errors / worker blips).
+    Skips jobs that already hit max attempts or were requeued too often.
+    """
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=cooldown_minutes)).isoformat()
+    try:
+        result = (
+            sb.table("video_jobs")
+            .select("id,attempt_count,metadata,error_message,updated_at")
+            .eq("status", "failed")
+            .lt("attempt_count", max_attempts)
+            .lte("updated_at", cutoff)
+            .order("updated_at")
+            .limit(limit)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[RETRY] list failed jobs error: {exc}")
+        return 0
+
+    n = 0
+    for job in result.data or []:
+        meta = job.get("metadata") or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        auto_retries = int(meta.get("auto_retries") or 0)
+        if auto_retries >= 2:
+            continue
+        err = str(job.get("error_message") or "").lower()
+        # Permanent / config errors — do not spin forever
+        permanent = (
+            "youtube is not connected" in err
+            or "unauthorized" in err
+            or "no platform music" in err
+            or "library empty" in err
+            or ("training" in err and "required" in err)
+            or "fill required" in err
+        )
+        if permanent:
+            continue
+        new_meta = {
+            **meta,
+            "auto_retries": auto_retries + 1,
+            "auto_requeued_at": datetime.now(timezone.utc).isoformat(),
+            "previous_error": str(job.get("error_message") or "")[:500],
+            "auto_repair": True,
+        }
+        try:
+            updated = (
+                sb.table("video_jobs")
+                .update(
+                    {
+                        "status": "queued",
+                        "error_message": None,
+                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "metadata": new_meta,
+                    }
+                )
+                .eq("id", job["id"])
+                .eq("status", "failed")
+                .execute()
+            )
+            if updated.data:
+                n += 1
+                print(
+                    f"[RETRY] requeued failed job {job['id']} "
+                    f"(auto_retries={auto_retries + 1})"
+                )
+        except Exception as exc:
+            print(f"[RETRY] requeue {job.get('id')} failed: {exc}")
+    return n
+
+
+def requeue_stuck_jobs(
+    sb: Client,
+    *,
+    stale_minutes: int = 45,
+    max_attempts: int = 3,
+    limit: int = 5,
+) -> int:
+    """Return mid-pipeline jobs that haven't progressed (worker crash) to queued."""
+    from datetime import timedelta
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)).isoformat()
+    stuck_statuses = [
+        "generating_script",
+        "generating_voice",
+        "fetching_media",
+        "editing",
+        "uploading",
+    ]
+    try:
+        result = (
+            sb.table("video_jobs")
+            .select("id,attempt_count,metadata,status,updated_at")
+            .in_("status", stuck_statuses)
+            .lt("attempt_count", max_attempts)
+            .lte("updated_at", cutoff)
+            .order("updated_at")
+            .limit(limit)
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[RETRY] list stuck jobs error: {exc}")
+        return 0
+
+    n = 0
+    for job in result.data or []:
+        meta = job.get("metadata") or {}
+        if not isinstance(meta, dict):
+            meta = {}
+        stuck_retries = int(meta.get("stuck_retries") or 0)
+        if stuck_retries >= 2:
+            continue
+        new_meta = {
+            **meta,
+            "stuck_retries": stuck_retries + 1,
+            "stuck_requeued_at": datetime.now(timezone.utc).isoformat(),
+            "stuck_from_status": job.get("status"),
+            "auto_repair": True,
+        }
+        try:
+            updated = (
+                sb.table("video_jobs")
+                .update(
+                    {
+                        "status": "queued",
+                        "error_message": None,
+                        "scheduled_for": datetime.now(timezone.utc).isoformat(),
+                        "metadata": new_meta,
+                    }
+                )
+                .eq("id", job["id"])
+                .in_("status", stuck_statuses)
+                .execute()
+            )
+            if updated.data:
+                n += 1
+                print(
+                    f"[RETRY] requeued stuck job {job['id']} "
+                    f"(from {job.get('status')})"
+                )
+        except Exception as exc:
+            print(f"[RETRY] stuck requeue {job.get('id')} failed: {exc}")
+    return n
+
+
 def beat_presence(sb: Client, *, working: bool = False) -> None:
     """Tell the dashboard the Python worker is alive."""
     import socket

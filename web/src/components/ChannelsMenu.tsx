@@ -48,7 +48,11 @@ export function ChannelsMenu({
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (!rootRef.current?.contains(e.target as Node)) onClose();
+      const t = e.target as Node | null;
+      if (!t) return;
+      // Ignore the toggle button so a second press can close the menu
+      if ((t as Element).closest?.("[data-channels-toggle]")) return;
+      if (!rootRef.current?.contains(t)) onClose();
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -76,7 +80,7 @@ export function ChannelsMenu({
       return;
     }
     onClose();
-    router.push("/dashboard");
+    router.push("/dashboard/channel");
     router.refresh();
   }
 
@@ -85,7 +89,7 @@ export function ChannelsMenu({
   return (
     <div
       ref={rootRef}
-      className="absolute left-0 right-0 top-full z-[70] mt-1.5 w-full overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl sm:right-auto sm:w-[min(100vw-2rem,280px)] sm:rounded-xl"
+      className="absolute left-0 top-full z-[80] mt-1.5 w-[min(calc(100vw-1.25rem),340px)] overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl sm:w-[min(100vw-2rem,300px)] sm:rounded-xl"
       role="dialog"
       aria-label="YouTube channels"
     >

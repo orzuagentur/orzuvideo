@@ -9,8 +9,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
-import { YouTubeChannelsButton } from "@/components/AppShell";
-
 type MediaKind = "all" | "video" | "photo" | "music";
 
 type MediaCard = {
@@ -592,7 +590,6 @@ export function MediaStudio() {
         onSubmit={onSearch}
         className="sticky top-14 z-40 -mx-3 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-3 py-2.5 backdrop-blur-md sm:top-[5.75rem] sm:-mx-4 sm:px-4 sm:py-3 md:top-[6.25rem] md:-mx-6 md:px-6"
       >
-        <YouTubeChannelsButton />
         <div className="relative min-w-0 flex-1">
           {showFormatFilter && (
             <div className="absolute left-1.5 top-1/2 z-10 -translate-y-1/2" ref={formatRef}>

@@ -10,6 +10,7 @@ from orzuvideo.pipeline.media import (
     write_ass_subtitles,
 )
 from orzuvideo.pipeline.montage import (
+    MOTION_PRESETS,
     concat_with_pro_transitions,
     normalize_clip_pro,
     pick_motion,
@@ -164,6 +165,11 @@ def build_short(
     size: tuple[int, int] | None = None,
     subtitle_style: str = "classic",
     visual_effect: str | None = None,
+    punch_first_clip: bool = True,
+    motions_enabled: bool = True,
+    allowed_motions: list[str] | None = None,
+    transitions_enabled: bool = True,
+    allowed_transitions: list[str] | None = None,
 ) -> Path:
     """Pro Shorts assembly: punch open, motion library, cinematic transitions."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -182,15 +188,19 @@ def build_short(
     for i, clip in enumerate(clips):
         dst = work_dir / f"norm_{i}.mp4"
         dur = hook_dur if i == 0 else per_rest
-        punch = i == 0
-        motion = pick_motion(punch=punch)
-        # Prefer unique motions across body clips
-        if not punch:
-            tries = 0
-            while motion["id"] in used_motions and tries < 6:
-                motion = pick_motion(punch=False)
-                tries += 1
-            used_motions.add(motion["id"])
+        punch = bool(punch_first_clip and i == 0)
+        if motions_enabled:
+            motion = pick_motion(punch=punch, allowed_ids=allowed_motions)
+            if not punch:
+                tries = 0
+                while motion["id"] in used_motions and tries < 6:
+                    motion = pick_motion(punch=False, allowed_ids=allowed_motions)
+                    tries += 1
+                used_motions.add(motion["id"])
+        else:
+            # Motions off: hold a gentle body motion (no punch)
+            body = [m for m in MOTION_PRESETS if m["id"] != "punch_in"]
+            motion = body[0] if body else pick_motion(punch=False)
         print(f"Clip {i} motion: {motion['id']} ({dur:.2f}s)")
         normalize_clip_pro(
             clip,
@@ -208,6 +218,8 @@ def build_short(
         normalized,
         timeline,
         overlap=overlap if n > 1 else 0.0,
+        allowed_transitions=allowed_transitions,
+        transitions_enabled=transitions_enabled,
     )
 
     tl_dur = ffprobe_duration(timeline)

@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type CSSProperties,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -23,6 +22,10 @@ import { useToast } from "@/components/ToastNotice";
 import { clippingSourcePath, MEDIA_BUCKET } from "@/lib/storage";
 import { VoicePicker } from "@/components/VoicePicker";
 import { SUBTITLE_STYLES } from "@/lib/editor-catalog";
+import {
+  SubtitleStyleCard,
+  type SubtitleStyleId,
+} from "@/components/SubtitleStylePicker";
 
 const ASPECTS = [
   { id: "9:16", label: "9:16", hint: "Shorts / Reels" },
@@ -42,38 +45,6 @@ const MAX_BYTES = 500 * 1024 * 1024; // 500 MB — matches storage bucket for cl
 const MAX_MB = Math.round(MAX_BYTES / (1024 * 1024));
 
 type Aspect = (typeof ASPECTS)[number]["id"];
-type SubtitleStyleId = (typeof SUBTITLE_STYLES)[number]["id"];
-
-/** Full sentence for live karaoke-style preview on each subtitle card */
-const PREVIEW_SENTENCE =
-  "This is how your subtitles look on the clip";
-const PREVIEW_WORDS = PREVIEW_SENTENCE.split(/\s+/);
-/** Match burned ASS: ~3 words on screen, then advance to the next group */
-const PREVIEW_CHUNK = 3;
-
-/** One square stock photo per style (Unsplash — free to display) */
-const SUBTITLE_PREVIEW_BG: Record<SubtitleStyleId, string> = {
-  classic:
-    "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=480&h=480&q=80",
-  karaoke_gold:
-    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=480&h=480&q=80",
-  box_white:
-    "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=480&h=480&q=80",
-  neon_pink:
-    "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&w=480&h=480&q=80",
-  minimal:
-    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=480&h=480&q=80",
-  impact:
-    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=480&h=480&q=80",
-  soft_shadow:
-    "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=480&h=480&q=80",
-  yellow_pop:
-    "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=480&h=480&q=80",
-  lower_third:
-    "https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=480&h=480&q=80",
-  hook_banner:
-    "https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?auto=format&fit=crop&w=480&h=480&q=80",
-};
 
 type ClipSource = {
   id: string;
@@ -143,13 +114,11 @@ async function downloadVideo(jobId: string, filename: string) {
 function Toggle({
   on,
   label,
-  detail,
   disabled,
   onChange,
 }: {
   on: boolean;
   label: string;
-  detail: string;
   disabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
@@ -158,7 +127,7 @@ function Toggle({
       type="button"
       disabled={disabled}
       onClick={() => onChange(!on)}
-      className="flex w-full items-start gap-3 rounded-xl border px-3.5 py-3 text-left transition"
+      className="flex min-w-0 items-center justify-center gap-1.5 rounded-lg border px-1.5 py-2 text-center transition sm:gap-2 sm:rounded-xl sm:px-3 sm:py-2.5"
       style={{
         borderColor: on ? "rgba(232,165,75,0.5)" : "var(--line)",
         background: on ? "rgba(232,165,75,0.1)" : "rgba(255,255,255,0.02)",
@@ -166,7 +135,7 @@ function Toggle({
       }}
     >
       <span
-        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[11px] font-bold"
+        className="flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] font-bold sm:h-5 sm:w-5 sm:rounded-md sm:text-[11px]"
         style={{
           borderColor: on ? "var(--accent)" : "var(--line)",
           background: on ? "var(--accent)" : "transparent",
@@ -176,216 +145,8 @@ function Toggle({
       >
         {on ? "✓" : ""}
       </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold">{label}</span>
-        <span className="mt-0.5 block text-xs text-[color:var(--muted)]">{detail}</span>
-      </span>
-    </button>
-  );
-}
-
-function liveSubtitleStyle(style: SubtitleStyleId): CSSProperties {
-  const base: CSSProperties = {
-    fontWeight: 800,
-    fontSize: "0.68rem",
-    lineHeight: 1.35,
-    textAlign: "center",
-    maxWidth: "100%",
-  };
-  switch (style) {
-    case "karaoke_gold":
-      return {
-        ...base,
-        color: "#FFD700",
-        textShadow: "0 0 10px rgba(255,215,0,0.55), 0 2px 4px #000",
-      };
-    case "box_white":
-      return {
-        ...base,
-        color: "#fff",
-        background: "rgba(0,0,0,0.62)",
-        borderRadius: 6,
-        padding: "4px 8px",
-        display: "inline-block",
-      };
-    case "neon_pink":
-      return {
-        ...base,
-        color: "#FF66FF",
-        textShadow: "0 0 10px #FF00AA, 0 2px 4px #000",
-      };
-    case "minimal":
-      return {
-        ...base,
-        color: "#f0f0f0",
-        fontWeight: 500,
-        textShadow: "0 1px 3px rgba(0,0,0,0.6)",
-      };
-    case "impact":
-      return {
-        ...base,
-        fontSize: "0.72rem",
-        color: "#fff",
-        textShadow: "2px 2px 0 #000, -1px -1px 0 #000",
-      };
-    case "soft_shadow":
-      return {
-        ...base,
-        color: "#fff",
-        textShadow: "0 3px 8px rgba(0,0,0,0.9)",
-      };
-    case "yellow_pop":
-      return {
-        ...base,
-        color: "#FFFF00",
-        textShadow: "0 2px 4px #000",
-      };
-    case "lower_third":
-      return {
-        ...base,
-        color: "#fff",
-        fontSize: "0.62rem",
-        background: "rgba(0,0,0,0.75)",
-        borderLeft: "3px solid var(--accent)",
-        padding: "4px 8px",
-        display: "inline-block",
-        textAlign: "left",
-      };
-    case "hook_banner":
-      return {
-        ...base,
-        color: "var(--accent)",
-        fontSize: "0.72rem",
-        textShadow: "0 2px 6px #000",
-      };
-    default:
-      return {
-        ...base,
-        color: "#fff",
-        textShadow: "0 2px 4px #000, 0 0 1px #000",
-      };
-  }
-}
-
-function SubtitleStyleCard({
-  style,
-  active,
-  disabled,
-  onSelect,
-}: {
-  style: (typeof SUBTITLE_STYLES)[number];
-  active: boolean;
-  disabled?: boolean;
-  onSelect: () => void;
-}) {
-  const [cursor, setCursor] = useState(0);
-  const [leaving, setLeaving] = useState(false);
-  const cursorRef = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    const timers: number[] = [];
-    const later = (fn: () => void, ms: number) => {
-      timers.push(window.setTimeout(fn, ms));
-    };
-
-    const advance = () => {
-      if (cancelled) return;
-      const c = cursorRef.current;
-      const next = (c + 1) % PREVIEW_WORDS.length;
-      const curChunk = Math.floor(c / PREVIEW_CHUNK);
-      const nextChunk = Math.floor(next / PREVIEW_CHUNK);
-      const wraps = nextChunk !== curChunk || next === 0;
-
-      if (wraps) {
-        setLeaving(true);
-        later(() => {
-          if (cancelled) return;
-          cursorRef.current = next;
-          setCursor(next);
-          setLeaving(false);
-          later(advance, 500);
-        }, 170);
-        return;
-      }
-
-      cursorRef.current = next;
-      setCursor(next);
-      later(advance, 500);
-    };
-
-    later(advance, 500);
-    return () => {
-      cancelled = true;
-      timers.forEach((id) => window.clearTimeout(id));
-    };
-  }, []);
-
-  const css = liveSubtitleStyle(style.id);
-  const bg = SUBTITLE_PREVIEW_BG[style.id];
-  const chunkStart = Math.floor(cursor / PREVIEW_CHUNK) * PREVIEW_CHUNK;
-  const chunk = PREVIEW_WORDS.slice(chunkStart, chunkStart + PREVIEW_CHUNK);
-  const activeInChunk = cursor - chunkStart;
-
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onSelect}
-      className="flex flex-col overflow-hidden rounded-xl border text-left transition"
-      style={{
-        borderColor: active ? "rgba(232,165,75,0.55)" : "var(--line)",
-        background: active ? "rgba(232,165,75,0.1)" : "rgba(0,0,0,0.25)",
-        boxShadow: active ? "0 0 0 1px rgba(232,165,75,0.25)" : undefined,
-      }}
-    >
-      <div className="relative aspect-square w-full overflow-hidden bg-black/40">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={bg}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover"
-          loading="lazy"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 flex min-h-[42%] items-end justify-center px-2.5 pb-3 pt-6">
-          <span
-            style={{
-              ...css,
-              display: "inline-block",
-              opacity: leaving ? 0 : 1,
-              transform: leaving ? "translateY(8px)" : "translateY(0)",
-              transition: "opacity 0.16s ease, transform 0.16s ease",
-            }}
-          >
-            {chunk.map((w, i) => {
-              const isLive = i === activeInChunk && !leaving;
-              const isPast = i < activeInChunk;
-              return (
-                <span
-                  key={`${chunkStart}-${w}-${i}`}
-                  style={{
-                    opacity: isLive ? 1 : isPast ? 0.9 : 0.38,
-                    transform: isLive
-                      ? "translateY(-1px) scale(1.1)"
-                      : "translateY(0) scale(1)",
-                    display: "inline-block",
-                    marginRight: i < chunk.length - 1 ? "0.3em" : 0,
-                    transition:
-                      "opacity 0.28s ease, transform 0.28s ease, filter 0.28s ease",
-                    filter: isLive ? "brightness(1.2)" : "none",
-                  }}
-                >
-                  {w}
-                </span>
-              );
-            })}
-          </span>
-        </div>
-      </div>
-      <span className="truncate px-2 py-1.5 text-[11px] font-semibold">
-        {style.label}
+      <span className="truncate text-[11px] font-semibold sm:text-sm">
+        {label}
       </span>
     </button>
   );
@@ -409,7 +170,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   const [addSubtitles, setAddSubtitles] = useState(true);
   const [subtitleStyle, setSubtitleStyle] =
     useState<SubtitleStyleId>("classic");
-  const [subsOpen, setSubsOpen] = useState(true);
+  const [subsOpen, setSubsOpen] = useState(false);
   const [musicTrackId, setMusicTrackId] = useState("");
   const [musicOpen, setMusicOpen] = useState(false);
   const [musicTracks, setMusicTracks] = useState<
@@ -699,7 +460,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-8 pb-24">
       {notice}
 
-      <header className="rise">
+      <header className="rise hidden sm:block">
         <h1
           className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
           style={{ fontWeight: 800 }}
@@ -719,17 +480,17 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
             onChange={onFileInput}
           />
 
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            {/* Left — settings */}
-            <div className="space-y-5 rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-5">
+          <div className="grid min-w-0 items-start gap-4 lg:grid-cols-2">
+            {/* Settings — below videos on mobile */}
+            <div className="order-2 min-w-0 space-y-4 overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-3 sm:order-1 sm:space-y-5 sm:p-5">
               <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)] sm:mb-2">
                   Format
                 </p>
-                <p className="mb-2 text-[11px] text-[color:var(--muted)]">
+                <p className="mb-1.5 text-[11px] text-[color:var(--muted)] sm:mb-2">
                   Output is locked to the format you pick.
                 </p>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                   {ASPECTS.map((a) => {
                     const on = aspect === a.id;
                     return (
@@ -738,7 +499,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                         type="button"
                         disabled={creating}
                         onClick={() => setAspect(a.id)}
-                        className="rounded-xl border px-3 py-3 text-center transition"
+                        className="rounded-lg border px-1.5 py-2 text-center transition sm:rounded-xl sm:px-3 sm:py-3"
                         style={{
                           borderColor: on
                             ? "rgba(232,165,75,0.55)"
@@ -749,12 +510,12 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                         }}
                       >
                         <span
-                          className="block text-sm font-bold"
+                          className="block text-xs font-bold sm:text-sm"
                           style={{ color: on ? "var(--accent)" : "var(--fg)" }}
                         >
                           {a.label}
                         </span>
-                        <span className="mt-0.5 block text-[11px] text-[color:var(--muted)]">
+                        <span className="mt-0.5 block truncate text-[9px] text-[color:var(--muted)] sm:text-[11px]">
                           {a.hint}
                         </span>
                       </button>
@@ -764,13 +525,13 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
               </div>
 
               <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                <p className="mb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)] sm:mb-2">
                   Length
                 </p>
-                <p className="mb-2 text-[11px] text-[color:var(--muted)]">
+                <p className="mb-1.5 text-[11px] text-[color:var(--muted)] sm:mb-2">
                   Clip is cut to this duration — not longer.
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   {DURATIONS.map((d) => {
                     const on = duration === d.id;
                     return (
@@ -779,7 +540,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                         type="button"
                         disabled={creating}
                         onClick={() => setDuration(d.id)}
-                        className="min-w-[4.5rem] rounded-full border px-4 py-2 text-sm font-semibold transition"
+                        className="rounded-full border px-1.5 py-1.5 text-xs font-semibold transition sm:min-w-[4.5rem] sm:px-4 sm:py-2 sm:text-sm"
                         style={{
                           borderColor: on
                             ? "rgba(232,165,75,0.55)"
@@ -797,52 +558,168 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                 </div>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                 <Toggle
                   on={useVoice}
                   disabled={creating}
                   label="Voice"
-                  detail="ElevenLabs narration"
                   onChange={setUseVoice}
                 />
                 <Toggle
                   on={addMusic}
                   disabled={creating}
                   label="Music"
-                  detail="Background track"
                   onChange={setAddMusic}
                 />
                 <Toggle
                   on={addSubtitles}
                   disabled={creating}
                   label="Subtitles"
-                  detail="Burn karaoke captions"
                   onChange={setAddSubtitles}
                 />
               </div>
 
-              {useVoice && (
-                <div className="rounded-xl border border-[color:var(--line)]">
-                  <button
-                    type="button"
-                    disabled={creating}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-                    onClick={() => setVoiceOpen((v) => !v)}
-                  >
-                    <span>
-                      <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
-                        Voice
-                      </span>
-                      <span className="text-sm">
-                        {voiceId ? "Custom voice" : "Auto — AI picks"}
-                      </span>
-                    </span>
-                    <span className="text-xs text-[color:var(--muted)]">
-                      {voiceOpen ? "Hide" : "Show"}
-                    </span>
-                  </button>
-                  {voiceOpen && (
-                    <div className="border-t border-[color:var(--line)] p-3">
+              {/* Mobile: Voice / Music / Subtitles picker chips in one row;
+                  open list renders below so chip size never changes */}
+              {(useVoice || addMusic || addSubtitles) && (
+                <div className="space-y-2 sm:hidden">
+                  <div className="flex gap-1.5">
+                    {useVoice && (
+                      <button
+                        type="button"
+                        disabled={creating}
+                        onClick={() => {
+                          const next = !voiceOpen;
+                          setVoiceOpen(next);
+                          if (next) {
+                            setMusicOpen(false);
+                            setSubsOpen(false);
+                          }
+                        }}
+                        className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 py-1.5 text-center text-[11px] font-semibold transition"
+                        style={{
+                          borderColor: voiceOpen
+                            ? "rgba(232,165,75,0.55)"
+                            : "var(--line)",
+                          background: voiceOpen
+                            ? "rgba(232,165,75,0.12)"
+                            : "transparent",
+                          color: voiceOpen ? "var(--accent)" : "var(--fg)",
+                        }}
+                      >
+                        <span>Voice</span>
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          style={{
+                            opacity: 0.7,
+                            transform: voiceOpen ? "rotate(180deg)" : undefined,
+                            transition: "transform 0.15s ease",
+                          }}
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    )}
+                    {addMusic && (
+                      <button
+                        type="button"
+                        disabled={creating}
+                        onClick={() => {
+                          const next = !musicOpen;
+                          setMusicOpen(next);
+                          if (next) {
+                            setVoiceOpen(false);
+                            setSubsOpen(false);
+                          }
+                        }}
+                        className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 py-1.5 text-center text-[11px] font-semibold transition"
+                        style={{
+                          borderColor: musicOpen
+                            ? "rgba(232,165,75,0.55)"
+                            : "var(--line)",
+                          background: musicOpen
+                            ? "rgba(232,165,75,0.12)"
+                            : "transparent",
+                          color: musicOpen ? "var(--accent)" : "var(--fg)",
+                        }}
+                      >
+                        <span>Music</span>
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          style={{
+                            opacity: 0.7,
+                            transform: musicOpen ? "rotate(180deg)" : undefined,
+                            transition: "transform 0.15s ease",
+                          }}
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    )}
+                    {addSubtitles && (
+                      <button
+                        type="button"
+                        disabled={creating}
+                        onClick={() => {
+                          const next = !subsOpen;
+                          setSubsOpen(next);
+                          if (next) {
+                            setVoiceOpen(false);
+                            setMusicOpen(false);
+                          }
+                        }}
+                        className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg border px-1.5 py-1.5 text-center text-[11px] font-semibold transition"
+                        style={{
+                          borderColor: subsOpen
+                            ? "rgba(232,165,75,0.55)"
+                            : "var(--line)",
+                          background: subsOpen
+                            ? "rgba(232,165,75,0.12)"
+                            : "transparent",
+                          color: subsOpen ? "var(--accent)" : "var(--fg)",
+                        }}
+                      >
+                        <span>Subtitles</span>
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          style={{
+                            opacity: 0.7,
+                            transform: subsOpen ? "rotate(180deg)" : undefined,
+                            transition: "transform 0.15s ease",
+                          }}
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+
+                  {useVoice && voiceOpen && (
+                    <div className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--line)] p-2">
                       <VoicePicker
                         value={voiceId}
                         onChange={setVoiceId}
@@ -851,34 +728,9 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       />
                     </div>
                   )}
-                </div>
-              )}
 
-              {addMusic && (
-                <div className="rounded-xl border border-[color:var(--line)]">
-                  <button
-                    type="button"
-                    disabled={creating}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-                    onClick={() => setMusicOpen((v) => !v)}
-                  >
-                    <span>
-                      <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
-                        Music
-                      </span>
-                      <span className="text-sm">
-                        {musicTrackId
-                          ? musicTracks.find((t) => t.id === musicTrackId)
-                              ?.name || "Selected track"
-                          : "Auto"}
-                      </span>
-                    </span>
-                    <span className="text-xs text-[color:var(--muted)]">
-                      {musicOpen ? "Hide" : "Show"}
-                    </span>
-                  </button>
-                  {musicOpen && (
-                    <div className="space-y-2 border-t border-[color:var(--line)] p-3">
+                  {addMusic && musicOpen && (
+                    <div className="min-w-0 space-y-2 overflow-hidden rounded-xl border border-[color:var(--line)] p-2">
                       {musicLoading ? (
                         <p className="text-xs text-[color:var(--muted)]">
                           Loading tracks…
@@ -888,11 +740,11 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                           No tracks available yet.
                         </p>
                       ) : (
-                        <div className="max-h-[280px] space-y-1.5 overflow-y-auto">
+                        <div className="max-h-[280px] space-y-1.5 overflow-y-auto overflow-x-hidden">
                           <button
                             type="button"
                             disabled={creating}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition"
+                            className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left transition"
                             style={{
                               background: !musicTrackId
                                 ? "rgba(232,165,75,0.12)"
@@ -908,16 +760,16 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-xs">
                               ✦
                             </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-sm font-medium">
+                            <span className="min-w-0 flex-1 overflow-hidden">
+                              <span className="block truncate text-sm font-medium">
                                 Auto
                               </span>
-                              <span className="block text-[11px] text-[color:var(--muted)]">
+                              <span className="block truncate text-[11px] text-[color:var(--muted)]">
                                 AI picks a track
                               </span>
                             </span>
                             {!musicTrackId && (
-                              <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
                                 ✓
                               </span>
                             )}
@@ -928,7 +780,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                             return (
                               <div
                                 key={t.id}
-                                className="flex items-center gap-2 rounded-lg px-2 py-1.5"
+                                className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5"
                                 style={{
                                   background: on
                                     ? "rgba(232,165,75,0.12)"
@@ -958,7 +810,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                                 <button
                                   type="button"
                                   disabled={creating}
-                                  className="min-w-0 flex-1 text-left"
+                                  className="min-w-0 flex-1 overflow-hidden text-left"
                                   onClick={() => setMusicTrackId(t.id)}
                                 >
                                   <span className="block truncate text-sm font-medium">
@@ -969,7 +821,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                                   </span>
                                 </button>
                                 {on && (
-                                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                                  <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
                                     ✓
                                   </span>
                                 )}
@@ -980,33 +832,10 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       )}
                     </div>
                   )}
-                </div>
-              )}
 
-              {addSubtitles && (
-                <div className="rounded-xl border border-[color:var(--line)]">
-                  <button
-                    type="button"
-                    disabled={creating}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-                    onClick={() => setSubsOpen((v) => !v)}
-                  >
-                    <span>
-                      <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
-                        Subtitle style
-                      </span>
-                      <span className="text-sm">
-                        {SUBTITLE_STYLES.find((s) => s.id === subtitleStyle)
-                          ?.label || "Classic"}
-                      </span>
-                    </span>
-                    <span className="text-xs text-[color:var(--muted)]">
-                      {subsOpen ? "Hide" : "Show"}
-                    </span>
-                  </button>
-                  {subsOpen && (
-                    <div className="border-t border-[color:var(--line)] p-3">
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {addSubtitles && subsOpen && (
+                    <div className="rounded-xl border border-[color:var(--line)] p-2">
+                      <div className="grid grid-cols-3 gap-1.5">
                         {SUBTITLE_STYLES.map((s) => (
                           <SubtitleStyleCard
                             key={s.id}
@@ -1021,6 +850,210 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                   )}
                 </div>
               )}
+
+              {/* Desktop: stacked accordions (unchanged behavior) */}
+              <div className="hidden space-y-4 sm:block">
+                {useVoice && (
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--line)]">
+                    <button
+                      type="button"
+                      disabled={creating}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                      onClick={() => setVoiceOpen((v) => !v)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                          Voice
+                        </span>
+                        <span className="block truncate text-sm">
+                          {voiceId ? "Custom voice" : "Auto — AI picks"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-[color:var(--muted)]">
+                        {voiceOpen ? "Hide" : "Show"}
+                      </span>
+                    </button>
+                    {voiceOpen && (
+                      <div className="min-w-0 overflow-hidden border-t border-[color:var(--line)] p-3">
+                        <VoicePicker
+                          value={voiceId}
+                          onChange={setVoiceId}
+                          hideSearch
+                          allowAuto
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {addMusic && (
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--line)]">
+                    <button
+                      type="button"
+                      disabled={creating}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                      onClick={() => setMusicOpen((v) => !v)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                          Music
+                        </span>
+                        <span className="block truncate text-sm">
+                          {musicTrackId
+                            ? musicTracks.find((t) => t.id === musicTrackId)
+                                ?.name || "Selected track"
+                            : "Auto"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-[color:var(--muted)]">
+                        {musicOpen ? "Hide" : "Show"}
+                      </span>
+                    </button>
+                    {musicOpen && (
+                      <div className="min-w-0 space-y-2 overflow-hidden border-t border-[color:var(--line)] p-3">
+                        {musicLoading ? (
+                          <p className="text-xs text-[color:var(--muted)]">
+                            Loading tracks…
+                          </p>
+                        ) : musicTracks.length === 0 ? (
+                          <p className="text-xs text-[color:var(--muted)]">
+                            No tracks available yet.
+                          </p>
+                        ) : (
+                          <div className="max-h-[280px] space-y-1.5 overflow-y-auto overflow-x-hidden">
+                            <button
+                              type="button"
+                              disabled={creating}
+                              className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left transition"
+                              style={{
+                                background: !musicTrackId
+                                  ? "rgba(232,165,75,0.12)"
+                                  : "transparent",
+                                border: `1px solid ${
+                                  !musicTrackId
+                                    ? "rgba(232,165,75,0.45)"
+                                    : "transparent"
+                                }`,
+                              }}
+                              onClick={() => setMusicTrackId("")}
+                            >
+                              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-xs">
+                                ✦
+                              </span>
+                              <span className="min-w-0 flex-1 overflow-hidden">
+                                <span className="block truncate text-sm font-medium">
+                                  Auto
+                                </span>
+                                <span className="block truncate text-[11px] text-[color:var(--muted)]">
+                                  AI picks a track
+                                </span>
+                              </span>
+                              {!musicTrackId && (
+                                <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                                  ✓
+                                </span>
+                              )}
+                            </button>
+                            {musicTracks.map((t) => {
+                              const on = musicTrackId === t.id;
+                              const playing = musicPlayingId === t.id;
+                              return (
+                                <div
+                                  key={t.id}
+                                  className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5"
+                                  style={{
+                                    background: on
+                                      ? "rgba(232,165,75,0.12)"
+                                      : "transparent",
+                                    border: `1px solid ${
+                                      on
+                                        ? "rgba(232,165,75,0.45)"
+                                        : "transparent"
+                                    }`,
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm"
+                                    style={{
+                                      background: playing
+                                        ? "rgba(232,165,75,0.9)"
+                                        : "rgba(255,255,255,0.08)",
+                                      color: playing ? "#111" : "var(--fg)",
+                                    }}
+                                    disabled={!t.previewUrl || creating}
+                                    aria-label={playing ? "Stop" : "Play"}
+                                    onClick={() => toggleMusicPreview(t)}
+                                  >
+                                    {playing ? "■" : "▶"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={creating}
+                                    className="min-w-0 flex-1 overflow-hidden text-left"
+                                    onClick={() => setMusicTrackId(t.id)}
+                                  >
+                                    <span className="block truncate text-sm font-medium">
+                                      {t.name}
+                                    </span>
+                                    <span className="block truncate text-[11px] text-[color:var(--muted)]">
+                                      {t.artist}
+                                    </span>
+                                  </button>
+                                  {on && (
+                                    <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--accent)]">
+                                      ✓
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {addSubtitles && (
+                  <div className="min-w-0 overflow-hidden rounded-xl border border-[color:var(--line)]">
+                    <button
+                      type="button"
+                      disabled={creating}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                      onClick={() => setSubsOpen((v) => !v)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                          Subtitle style
+                        </span>
+                        <span className="block truncate text-sm">
+                          {SUBTITLE_STYLES.find((s) => s.id === subtitleStyle)
+                            ?.label || "Classic"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-[color:var(--muted)]">
+                        {subsOpen ? "Hide" : "Show"}
+                      </span>
+                    </button>
+                    {subsOpen && (
+                      <div className="border-t border-[color:var(--line)] p-3">
+                        <div className="grid grid-cols-4 gap-2">
+                          {SUBTITLE_STYLES.map((s) => (
+                            <SubtitleStyleCard
+                              key={s.id}
+                              style={s}
+                              active={subtitleStyle === s.id}
+                              disabled={creating}
+                              onSelect={() => setSubtitleStyle(s.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
@@ -1049,8 +1082,8 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
               </button>
             </div>
 
-            {/* Right — videos card (scrolls inside) */}
-            <div className="flex flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] lg:sticky lg:top-4 lg:max-h-[min(720px,calc(100vh-7rem))]">
+            {/* Videos — above settings on mobile */}
+            <div className="order-1 flex flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] sm:order-2 lg:sticky lg:top-4 lg:max-h-[min(720px,calc(100vh-7rem))]">
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[color:var(--line)] px-4 py-3">
                 <p className="text-sm font-semibold">Videos</p>
                 {sources.length > 0 && sources.length < MAX_SOURCES && (
@@ -1072,12 +1105,12 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
 
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {sources.length === 0 ? (
-                  <div className="flex min-h-[280px] flex-col items-center justify-center">
+                  <div className="flex min-h-[160px] flex-col items-center justify-center sm:min-h-[280px]">
                     <button
                       type="button"
                       disabled={creating}
                       onClick={() => fileRef.current?.click()}
-                      className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-16 text-center transition hover:border-[color:rgba(232,165,75,0.45)]"
+                      className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition hover:border-[color:rgba(232,165,75,0.45)] sm:py-16"
                       style={{ borderColor: "var(--line)" }}
                     >
                       <span
@@ -1179,35 +1212,43 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
       )}
 
       {tab === "clips" && (
-        <section className="rise-delay space-y-4">
+        <section className="rise-delay space-y-3 sm:space-y-4">
           {jobs.length === 0 ? (
-            <p className="text-sm text-[color:var(--muted)]">
+            <p className="rounded-2xl border border-dashed border-[color:var(--line)] px-4 py-10 text-center text-sm text-[color:var(--muted)]">
               No clips yet. Create one in the Create tab.
             </p>
           ) : (
-            <ul className="grid gap-4 sm:grid-cols-2">
+            <ul className="grid grid-cols-2 gap-2 sm:gap-4 md:grid-cols-3">
               {jobs.map((job) => {
                 const ready = job.status === "ready" && job.preview_url;
                 const busy = QUEUE_STATUSES.has(job.status);
                 const failed = job.status === "failed";
                 const pct = jobProgressPercent(job.status);
+                const aspect = String(job.metadata?.aspect_ratio || "9:16");
+                const previewAspect =
+                  aspect === "16:9"
+                    ? "aspect-video"
+                    : aspect === "1:1"
+                      ? "aspect-square"
+                      : "aspect-[9/16]";
                 return (
                   <li
                     key={job.id}
-                    className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]"
+                    className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] sm:rounded-2xl"
                   >
-                    <div className="relative aspect-video bg-black/50">
+                    <div className={`relative w-full bg-black/50 ${previewAspect}`}>
                       {ready ? (
                         <video
                           src={`/api/jobs/${job.id}/preview`}
                           controls
-                          className="h-full w-full object-contain"
+                          playsInline
+                          className="h-full w-full object-cover"
                           preload="metadata"
                         />
                       ) : (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center">
+                        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-2.5 text-center sm:gap-2 sm:px-4">
                           <p
-                            className="text-sm font-semibold"
+                            className="text-[11px] font-semibold sm:text-sm"
                             style={{
                               color: failed
                                 ? "var(--danger)"
@@ -1218,10 +1259,10 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                           </p>
                           {busy && (
                             <>
-                              <p className="text-2xl font-bold tabular-nums text-[color:var(--fg)]">
+                              <p className="text-lg font-bold tabular-nums text-[color:var(--fg)] sm:text-2xl">
                                 {pct}%
                               </p>
-                              <div className="h-1.5 w-2/3 overflow-hidden rounded-full bg-white/10">
+                              <div className="h-1 w-3/4 overflow-hidden rounded-full bg-white/10 sm:h-1.5 sm:w-2/3">
                                 <div
                                   className="h-full rounded-full transition-all"
                                   style={{
@@ -1233,7 +1274,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                             </>
                           )}
                           {failed && job.error_message && (
-                            <p className="line-clamp-3 text-xs text-[color:var(--muted)]">
+                            <p className="line-clamp-3 text-[10px] text-[color:var(--muted)] sm:text-xs">
                               {job.error_message}
                             </p>
                           )}
@@ -1242,13 +1283,13 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       {ready && (
                         <a
                           href={`/dashboard/editor/${job.id}`}
-                          className="absolute left-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
+                          className="absolute left-1.5 top-1.5 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80 sm:left-2 sm:top-2 sm:h-8 sm:w-8"
                           aria-label="Edit"
                           title="Edit"
                         >
                           <svg
-                            width="14"
-                            height="14"
+                            width="13"
+                            height="13"
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
@@ -1291,14 +1332,14 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                         />
                       </CardMenuSlot>
                     </div>
-                    <div className="space-y-1 border-t border-[color:var(--line)] px-3.5 py-3">
-                      <p className="truncate text-sm font-semibold">
+                    <div className="min-w-0 space-y-0.5 border-t border-[color:var(--line)] px-2 py-1.5 sm:space-y-1 sm:px-3.5 sm:py-3">
+                      <p className="truncate text-xs font-semibold sm:text-sm">
                         {job.title || "AI Clip"}
                       </p>
-                      <p className="text-xs text-[color:var(--muted)]">
+                      <p className="truncate text-[10px] text-[color:var(--muted)] sm:text-xs">
                         {job.duration_seconds ? `${job.duration_seconds}s` : "—"}
                         {" · "}
-                        {String(job.metadata?.aspect_ratio || "9:16")}
+                        {aspect}
                       </p>
                     </div>
                   </li>

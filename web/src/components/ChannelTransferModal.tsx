@@ -70,7 +70,7 @@ export function ChannelTransferModal() {
       return;
     }
     setState(null);
-    router.push("/dashboard");
+    router.push("/dashboard/channel");
     router.refresh();
   }
 

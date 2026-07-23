@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { FormEvent, Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { BrandLogo } from "@/components/BrandLogo";
 
 function LoginForm() {
-  const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -61,8 +60,7 @@ function LoginForm() {
     if (!notify.ok) {
       const notifyData = await notify.json().catch(() => ({}));
       if (notifyData.needsOtp) {
-        router.push("/login/verify?mode=signup");
-        router.refresh();
+        window.location.assign("/login/verify?mode=signup");
         return;
       }
       setError(
@@ -71,8 +69,9 @@ function LoginForm() {
       return;
     }
 
-    router.push("/dashboard");
-    router.refresh();
+    // Hard navigation so auth cookies from API responses are applied before
+    // the dashboard layout runs (important on mobile / LAN IP testing).
+    window.location.assign("/dashboard");
   }
 
   async function signInWithGoogle() {

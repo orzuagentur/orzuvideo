@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/middleware";
+import {
+  requeueFailedJobs,
+  requeueStuckJobs,
+} from "@/lib/requeue-failed-jobs";
 
 export const runtime = "nodejs";
 
@@ -12,6 +16,7 @@ function todayInTz(timezone: string): {
   dateStr: string;
   weekday: number;
   hhmm: string;
+  minutesOfDay: number;
 } {
   const fmt = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -21,16 +26,58 @@ function todayInTz(timezone: string): {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    weekday: "short",
   });
   const parts = Object.fromEntries(
     fmt.formatToParts(new Date()).map((p) => [p.type, p.value]),
   );
-  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
-  // Intl can return "24" for midnight in some environments — normalize to 00
-  const hour = parts.hour === "24" ? "00" : parts.hour;
-  const hhmm = `${hour}:${parts.minute}`;
-  const weekday = weekdayMon1(new Date(`${dateStr}T${hhmm}:00`));
-  return { dateStr, weekday, hhmm };
+  let dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  // Intl can return "24" for midnight — treat as 00:00 next calendar day edge
+  let hour = parts.hour === "24" ? "00" : parts.hour;
+  if (parts.hour === "24") {
+    // Keep calendar date from formatter; hour normalized to 00
+    hour = "00";
+  }
+  const minute = parts.minute || "00";
+  const hhmm = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const minutesOfDay =
+    Number(hour) * 60 + Number(minute);
+
+  const wdMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+  const weekday = wdMap[parts.weekday || ""] || weekdayMon1(new Date(`${dateStr}T12:00:00Z`));
+  return { dateStr, weekday, hhmm, minutesOfDay };
+}
+
+function slotMinutes(hhmm: string): number {
+  const [h, m] = String(hhmm).split(":");
+  return Number(h || 0) * 60 + Number(m || 0);
+}
+
+/**
+ * Match schedule slots in the user's timezone.
+ * Cron runs every 15 minutes — fire when "now" has reached the slot
+ * and is still within a 15-minute window (dedupe prevents doubles).
+ */
+function matchScheduleSlot(
+  activeTimes: string[],
+  minutesOfDay: number,
+): string | null {
+  const WINDOW = 15;
+  for (const t of activeTimes) {
+    const slot = slotMinutes(t);
+    if (minutesOfDay >= slot && minutesOfDay < slot + WINDOW) {
+      return t;
+    }
+  }
+  return null;
 }
 
 function normalizeTimes(times: string[]): string[] {
@@ -74,12 +121,10 @@ function cronAuthorized(request: Request): boolean {
 }
 
 /**
- * Hourly cron: ONE job per matched clock hour.
- * videos_per_day=3 + times [09:00,14:00,20:00] → three separate publishes.
- *
- * Pipeline:
- * 1) This route only INSERTS queued video_jobs (needs Schedule ON + trained + YT connected)
- * 2) Python worker must be running to render + upload
+ * Every 15 minutes:
+ * 0) Auto-repair: requeue failed jobs (+ stuck mid-pipeline jobs)
+ * 1) INSERT queued video_jobs for matched schedule slots (Schedule ON + trained + YT)
+ * 2) Python worker renders + uploads
  * Web logout does NOT stop this — uses service role, not the browser session.
  */
 export async function GET(request: Request) {
@@ -91,6 +136,22 @@ export async function GET(request: Request) {
   let created = 0;
   let skipped = 0;
   const reasons: string[] = [];
+
+  // Auto-repair failed / stuck jobs before enqueueing new schedule slots
+  const failedRepair = await requeueFailedJobs(sb);
+  const stuckRepair = await requeueStuckJobs(sb);
+  if (failedRepair.requeued) {
+    console.log(
+      `[RETRY] cron requeued ${failedRepair.requeued} failed job(s)`,
+      failedRepair.ids,
+    );
+  }
+  if (stuckRepair.requeued) {
+    console.log(
+      `[RETRY] cron requeued ${stuckRepair.requeued} stuck job(s)`,
+      stuckRepair.ids,
+    );
+  }
 
   const { data: schedules } = await sb
     .from("publish_schedules")
@@ -140,7 +201,20 @@ export async function GET(request: Request) {
     }
 
     const tz = schedule.timezone || "UTC";
-    const { dateStr, weekday, hhmm } = todayInTz(tz);
+    let dateStr: string;
+    let weekday: number;
+    let minutesOfDay: number;
+    try {
+      const nowTz = todayInTz(tz);
+      dateStr = nowTz.dateStr;
+      weekday = nowTz.weekday;
+      minutesOfDay = nowTz.minutesOfDay;
+    } catch {
+      skipped += 1;
+      reasons.push(`${schedule.user_id}: invalid timezone ${tz}`);
+      continue;
+    }
+
     const times = normalizeTimes(schedule.times || []);
     const perDay = Math.min(
       10,
@@ -148,12 +222,7 @@ export async function GET(request: Request) {
     );
     const activeTimes = times.slice(0, perDay);
 
-    // Match the scheduled slot whose hour equals the current hour in the schedule TZ
-    const matchedTime = activeTimes.find((t) => {
-      const [th] = t.split(":");
-      const [ch] = hhmm.split(":");
-      return String(th).padStart(2, "0") === String(ch).padStart(2, "0");
-    });
+    const matchedTime = matchScheduleSlot(activeTimes, minutesOfDay);
     if (!matchedTime) {
       skipped += 1;
       continue;
@@ -184,6 +253,7 @@ export async function GET(request: Request) {
       metadata: {
         schedule_slot: slotKey,
         schedule_time: matchedTime,
+        schedule_timezone: tz,
         videos_per_day: perDay,
         youtube_channel_id: schedule.youtube_channel_id || null,
         source: "schedule",
@@ -238,6 +308,8 @@ export async function GET(request: Request) {
     ok: true,
     created,
     skipped,
+    repaired_failed: failedRepair.requeued,
+    repaired_stuck: stuckRepair.requeued,
     reasons: reasons.slice(0, 20),
   });
 }

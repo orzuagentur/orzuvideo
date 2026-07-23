@@ -50,7 +50,7 @@ export default function AboutPage() {
           <ul className="list-disc space-y-2 pl-5 text-sm text-[color:var(--muted)]">
             <li>Train your AI once for channel niche, tone, and language</li>
             <li>Generate and publish YouTube Shorts with AI scripts and voice</li>
-            <li>Create personal videos from a free-form prompt (Creativity)</li>
+            <li>Create personal videos from a free-form prompt (AI Video)</li>
             <li>Build AI clips and montages with transitions and captions</li>
             <li>Use a music library and creator 3D / HDRI assets</li>
             <li>Connect Google / YouTube OAuth to publish from your channel</li>

@@ -2,7 +2,15 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getActiveYoutubeChannel } from "@/lib/youtube-channels";
 import { trainingRequiredComplete } from "@/lib/training-required";
+import { SUBTITLE_STYLE_IDS } from "@/lib/editor-catalog";
 import type { AiTraining } from "@/lib/types";
+
+function normalizeSubtitleStyle(raw: string): string {
+  const v = String(raw || "").trim();
+  if (SUBTITLE_STYLE_IDS.has(v)) return v;
+  if (v === "karaoke_bold" || v === "karaoke") return "karaoke_gold";
+  return "classic";
+}
 
 function normalizeVideoFormat(raw: string): string {
   const v = raw.trim().toLowerCase() || "shorts";
@@ -57,7 +65,7 @@ export async function POST(request: Request) {
         ? body.music_prefs
         : undefined,
     voice_id: String(body.voice_id || "").trim(),
-    subtitle_style: String(body.subtitle_style || "karaoke_bold").trim(),
+    subtitle_style: normalizeSubtitleStyle(String(body.subtitle_style || "classic")),
     duration_seconds: clampTrainingDuration(
       Number(body.duration_seconds) || 45,
       String(body.video_format || "shorts"),
@@ -76,7 +84,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          "Fill required fields first: Language, Voice, Music, Niche, and Script style",
+          "Fill required fields first: Language, Voice, and Niche",
       },
       { status: 400 },
     );
@@ -116,7 +124,7 @@ export async function POST(request: Request) {
         ? body.music_prefs
         : {},
     voice_id: formLike.voice_id,
-    subtitle_style: formLike.subtitle_style || "karaoke_bold",
+    subtitle_style: normalizeSubtitleStyle(formLike.subtitle_style || "classic"),
     duration_seconds: clampTrainingDuration(
       formLike.duration_seconds,
       formLike.video_format,

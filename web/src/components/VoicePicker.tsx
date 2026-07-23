@@ -151,7 +151,7 @@ export function VoicePicker({
   const autoOn = allowAuto && !value;
 
   return (
-    <div className="space-y-3">
+    <div className="min-w-0 space-y-3 overflow-hidden">
       {notice}
       {!hideSearch && (
         <>
@@ -192,11 +192,11 @@ export function VoicePicker({
         </p>
       )}
 
-      <div className="max-h-[320px] space-y-1.5 overflow-y-auto rounded-xl border border-[color:var(--line)] p-2">
+      <div className="max-h-[280px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded-xl border border-[color:var(--line)] p-1.5 sm:max-h-[320px] sm:p-2">
         {allowAuto && (
           <button
             type="button"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition"
+            className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left transition"
             style={{
               background: autoOn ? "rgba(232,165,75,0.12)" : "transparent",
               border: `1px solid ${
@@ -208,9 +208,9 @@ export function VoicePicker({
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/8 text-xs">
               ✦
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-medium">Auto</span>
-              <span className="block text-[11px] text-[color:var(--muted)]">
+            <span className="min-w-0 flex-1 overflow-hidden">
+              <span className="block truncate text-sm font-medium">Auto</span>
+              <span className="block truncate text-[11px] text-[color:var(--muted)]">
                 AI picks a voice
               </span>
             </span>
@@ -229,7 +229,7 @@ export function VoicePicker({
           return (
             <div
               key={`${v.source || "v"}-${v.id}`}
-              className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition"
+              className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 transition"
               style={{
                 background: isSelected
                   ? "rgba(232,165,75,0.12)"
@@ -260,7 +260,7 @@ export function VoicePicker({
 
               <button
                 type="button"
-                className="min-w-0 flex-1 text-left"
+                className="min-w-0 flex-1 overflow-hidden text-left"
                 onClick={() => onChange(v.id)}
               >
                 <span className="block truncate text-sm font-medium">

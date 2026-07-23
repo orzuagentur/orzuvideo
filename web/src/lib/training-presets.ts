@@ -178,9 +178,8 @@ export const LONG_DURATION_PRESETS: Preset[] = [
 ];
 
 export const VIDEO_FORMAT_PRESETS: Preset[] = [
-  { value: "shorts", label: "Short (9:16)" },
-  { value: "video", label: "Video (16:9)" },
-  { value: "simple", label: "Simple video (16:9)" },
+  { value: "shorts", label: "Shorts (9:16)" },
+  { value: "video", label: "Regular (16:9)" },
 ];
 
 export function isShortFormat(format: string): boolean {

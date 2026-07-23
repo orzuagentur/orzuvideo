@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Profile, VideoJob } from "@/lib/types";
 import { YouTubeVideoCards } from "@/components/YouTubeVideoCards";
+import { YouTubeChannelsButton } from "@/components/AppShell";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
 import {
   JOB_STATUS_LABEL,
@@ -76,6 +77,8 @@ export function ChannelStudio({
   }));
   const autoSyncDone = useRef(false);
   const pubMenuRef = useRef<HTMLDivElement>(null);
+  const analyticsRef = useRef<HTMLDivElement>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
   useEffect(() => {
     setQueue(initialQueue);
@@ -115,6 +118,17 @@ export function ChannelStudio({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [step]);
+
+  useEffect(() => {
+    if (!analyticsOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (!analyticsRef.current?.contains(e.target as Node)) {
+        setAnalyticsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [analyticsOpen]);
 
   useEffect(() => {
     setAiOn(aiContentEnabled);
@@ -401,11 +415,17 @@ export function ChannelStudio({
 
   if (!profile?.youtube_connected) {
     return (
-      <div className="panel rise space-y-4 p-6">
-        <h1 className="text-xl font-semibold sm:text-2xl">Home</h1>
+      <div className="panel rise relative space-y-4 p-6">
+        {notice}
+        <div className="absolute left-3 top-3 z-10">
+          <YouTubeChannelsButton />
+        </div>
+        <h1 className="mt-12 text-xl font-semibold sm:mt-14 sm:text-2xl">
+          YouTube channel
+        </h1>
         <p className="text-sm text-[color:var(--muted)]">
-          Connect a YouTube channel to publish videos and see stats. Use the red
-          YouTube button above to connect or switch channels.
+          Connect your YouTube channel. Professional AI will study it and help
+          you create Shorts, reply to comments, and publish every day.
         </p>
         <a href="/api/youtube/connect" className="btn btn-primary inline-flex">
           Connect YouTube
@@ -517,19 +537,94 @@ export function ChannelStudio({
         </PubModal>
       )}
 
-      <section className="panel rise relative">
+      <section className="panel rise relative z-40">
+        {/* Red YouTube Channels control — only on this card, top-left */}
+        <div
+          className="absolute left-2 top-2 z-50"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <YouTubeChannelsButton />
+        </div>
+
         <CardMenuSlot>
           <div className="relative flex flex-col items-end gap-1.5">
             <div className="relative flex items-center gap-1.5">
+              {/* Mobile-only: extra stats (views / likes / comments) */}
+              <div className="relative sm:hidden" ref={analyticsRef}>
+                <button
+                  type="button"
+                  title="Analytics"
+                  aria-label="Analytics"
+                  aria-expanded={analyticsOpen}
+                  onClick={() => {
+                    setStep("closed");
+                    setAnalyticsOpen((v) => !v);
+                  }}
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
+                  style={{
+                    boxShadow: analyticsOpen
+                      ? "0 0 0 2px rgba(232,165,75,0.55)"
+                      : undefined,
+                  }}
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M4 19V9" />
+                    <path d="M10 19V5" />
+                    <path d="M16 19v-7" />
+                    <path d="M22 19V8" />
+                  </svg>
+                </button>
+                {analyticsOpen && (
+                  <div
+                    className="absolute right-0 top-10 z-30 w-52 overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-2 shadow-2xl"
+                    role="dialog"
+                    aria-label="Channel analytics"
+                  >
+                    <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--muted)]">
+                      Analytics
+                    </p>
+                    <div className="grid grid-cols-1 gap-1.5">
+                      <Stat
+                        label="Views"
+                        value={channelStats.views}
+                        compact
+                      />
+                      <Stat
+                        label="Likes"
+                        value={channelStats.likes}
+                        compact
+                      />
+                      <Stat
+                        label="Comments"
+                        value={channelStats.comments}
+                        compact
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="relative" ref={pubMenuRef}>
                 <button
                   type="button"
                   title="Publications"
                   aria-label="Publications"
                   aria-expanded={step === "root"}
-                  onClick={() =>
-                    setStep((s) => (s === "closed" ? "root" : "closed"))
-                  }
+                  onClick={() => {
+                    setAnalyticsOpen(false);
+                    setStep((s) => (s === "closed" ? "root" : "closed"));
+                  }}
                   className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
                   style={{
                     boxShadow:
@@ -636,7 +731,7 @@ export function ChannelStudio({
           </div>
         </CardMenuSlot>
 
-        <div className="relative h-28 w-full overflow-hidden rounded-t-[inherit] bg-gradient-to-br from-[#1a1a1a] via-[#2a1810] to-[#0d0d0d] sm:h-36">
+        <div className="relative h-20 w-full overflow-hidden rounded-t-[inherit] bg-gradient-to-br from-[#1a1a1a] via-[#2a1810] to-[#0d0d0d] sm:h-36">
           {bannerUrl && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -648,23 +743,23 @@ export function ChannelStudio({
           <div className="absolute inset-0 bg-gradient-to-t from-[color:var(--bg-elevated)] via-transparent to-black/20" />
         </div>
 
-        <div className="relative -mt-10 space-y-4 px-3 pb-4 sm:px-6 sm:pb-5">
-          <div className="flex flex-wrap items-end gap-3 sm:gap-4">
+        <div className="relative -mt-7 space-y-3 px-3 pb-3 sm:-mt-10 sm:space-y-4 sm:px-6 sm:pb-5">
+          <div className="flex flex-wrap items-end gap-2.5 sm:gap-4">
             {channelStats.thumbnailUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={channelStats.thumbnailUrl}
                 alt=""
-                className="h-16 w-16 rounded-full border-4 border-[color:var(--bg-elevated)] object-cover sm:h-20 sm:w-20"
+                className="h-14 w-14 rounded-full border-4 border-[color:var(--bg-elevated)] object-cover sm:h-20 sm:w-20"
               />
             ) : (
-              <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-[color:var(--bg-elevated)] bg-black/40 text-sm sm:h-20 sm:w-20">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full border-4 border-[color:var(--bg-elevated)] bg-black/40 text-sm sm:h-20 sm:w-20">
                 YT
               </div>
             )}
-            <div className="min-w-0 flex-1 pb-1">
+            <div className="min-w-0 flex-1 pb-0.5 sm:pb-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-lg font-semibold sm:text-xl">
+                <h2 className="truncate text-base font-semibold sm:text-xl">
                   {channelStats.title || "YouTube channel"}
                 </h2>
                 {unauthorized && (
@@ -673,14 +768,20 @@ export function ChannelStudio({
                   </span>
                 )}
               </div>
-              <p className="truncate text-sm text-[color:var(--muted)]">
+              <p className="truncate text-xs text-[color:var(--muted)] sm:text-sm">
                 {channelStats.customUrl || profile.youtube_channel_id}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="grid min-w-0 flex-1 grid-cols-3 gap-2 text-center sm:max-w-2xl sm:grid-cols-5 sm:gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-2.5 sm:gap-3">
+            {/* Mobile: only subscribers + videos */}
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2 text-center sm:hidden">
+              <Stat label="Subscribers" value={channelStats.subscribers} />
+              <Stat label="Videos" value={channelStats.videos} />
+            </div>
+            {/* Desktop / tablet: full stats */}
+            <div className="hidden min-w-0 flex-1 grid-cols-3 gap-2 text-center sm:grid sm:max-w-2xl sm:grid-cols-5 sm:gap-3">
               <Stat label="Subscribers" value={channelStats.subscribers} />
               <Stat label="Views" value={channelStats.views} />
               <Stat label="Videos" value={channelStats.videos} />
@@ -689,16 +790,18 @@ export function ChannelStudio({
             </div>
 
             {/* AI Training + AI content toggle */}
-            <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <div className="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
               <a
                 href="/dashboard/channel/training"
-                className="rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-3 py-2 text-sm font-semibold transition hover:border-[color:rgba(232,165,75,0.45)]"
+                className="rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-2.5 py-1.5 text-xs font-semibold transition hover:border-[color:rgba(232,165,75,0.45)] sm:px-3 sm:py-2 sm:text-sm"
               >
                 AI Training
               </a>
-              <div className="flex items-center gap-2.5 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-2.5 py-2">
+              <div className="flex items-center gap-2 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg)]/80 px-2 py-1.5 sm:gap-2.5 sm:px-2.5 sm:py-2">
                 <div className="min-w-0 text-right">
-                  <p className="text-[11px] font-semibold leading-tight">AI content</p>
+                  <p className="text-[10px] font-semibold leading-tight sm:text-[11px]">
+                    AI content
+                  </p>
                   <p className="text-[9px] text-[color:var(--muted)]">
                     {aiOn ? "On schedule" : "Off"}
                   </p>
@@ -849,15 +952,31 @@ function PubModal({
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({
+  label,
+  value,
+  compact,
+}: {
+  label: string;
+  value: number;
+  compact?: boolean;
+}) {
   const text =
     value >= 1_000_000
       ? `${(value / 1_000_000).toFixed(1)}M`
       : value >= 1_000
         ? `${(value / 1_000).toFixed(1)}K`
         : String(value);
+  if (compact) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-[color:var(--line)] px-2.5 py-2">
+        <p className="text-[11px] text-[color:var(--muted)]">{label}</p>
+        <p className="text-sm font-semibold tabular-nums">{text}</p>
+      </div>
+    );
+  }
   return (
-    <div className="rounded-xl border border-[color:var(--line)] px-1.5 py-2.5 sm:px-2 sm:py-3">
+    <div className="rounded-xl border border-[color:var(--line)] px-1.5 py-2 sm:px-2 sm:py-3">
       <p className="text-base font-semibold tabular-nums sm:text-lg">{text}</p>
       <p className="truncate text-[10px] text-[color:var(--muted)] sm:text-[11px]">
         {label}

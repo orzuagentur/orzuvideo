@@ -271,7 +271,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
           className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
           style={{ fontWeight: 800 }}
         >
-          Creativity
+          AI Video
         </h1>
       </header>
 
@@ -376,7 +376,7 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
               No videos yet. Create one in the Create tab.
             </p>
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
               {[...activeJobs, ...libraryJobs].map((job) => {
                 const failed = job.status === "failed";
                 const busy = QUEUE_STATUSES.has(job.status);

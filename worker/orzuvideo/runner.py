@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import shutil
 import time
 import traceback
@@ -994,8 +995,15 @@ def process_job(job: dict) -> None:
             if isinstance(q, str) and q.strip()
         ]
         fallback_q = str(training.get("pexels_query") or "").strip()
+        niche_q = str(training.get("niche") or "").strip()
         if not queries:
-            queries = [fallback_q] if fallback_q else ["cinematic b-roll"]
+            queries = [fallback_q] if fallback_q else []
+        if niche_q and niche_q.lower() not in {q.lower() for q in queries}:
+            queries = [niche_q, *queries]
+        if not queries:
+            queries = ["cinematic b-roll"]
+        # Shuffle so we don't always pull the same first query's clips
+        random.shuffle(queries)
         clips, pexels_ids = download_stock_clips(
             queries,
             work / "clips",
@@ -1081,6 +1089,28 @@ def process_job(job: dict) -> None:
         # 4) Edit
         db.update_job(sb, job_id, status="editing")
         out_video = work / "short_final.mp4"
+        # Prefer AI Training subtitle style; fall back to script / job metadata
+        train_sub = str(training.get("subtitle_style") or "").strip()
+        script_sub = str(script_data.get("subtitle_style") or "").strip()
+        meta_sub = str(meta0.get("subtitle_style") or "").strip()
+        subtitle_style = train_sub or script_sub or meta_sub or "classic"
+
+        allowed_transitions = montage.get("enabled_transitions")
+        if not isinstance(allowed_transitions, list):
+            allowed_transitions = None
+        else:
+            allowed_transitions = [str(t) for t in allowed_transitions if t]
+
+        allowed_motions = montage.get("enabled_motions")
+        if not isinstance(allowed_motions, list):
+            allowed_motions = None
+        else:
+            allowed_motions = [str(m) for m in allowed_motions if m]
+
+        punch_first = bool(montage.get("punch_first_clip", True))
+        transitions_on = bool(montage.get("transitions_enabled", True))
+        motions_on = bool(montage.get("motions_enabled", True))
+
         build_short(
             clips=clips,
             voice_path=voice_path,
@@ -1094,17 +1124,18 @@ def process_job(job: dict) -> None:
             music_volume_body=body_vol,
             voice_volume=voice_vol,
             size=(out_w, out_h),
-            subtitle_style=str(
-                script_data.get("subtitle_style")
-                or meta0.get("subtitle_style")
-                or "classic"
-            ),
+            subtitle_style=subtitle_style,
             visual_effect=str(
                 script_data.get("visual_effect")
                 or meta0.get("visual_effect")
                 or meta0.get("effect")
                 or "cinematic"
             ),
+            punch_first_clip=punch_first,
+            motions_enabled=motions_on,
+            allowed_motions=allowed_motions,
+            transitions_enabled=transitions_on,
+            allowed_transitions=allowed_transitions,
         )
         db.update_job(sb, job_id, video_path=str(out_video), voice_path=str(voice_path))
 
@@ -1247,8 +1278,22 @@ def run_forever() -> None:
     print("OrzuAi worker started. Polling for jobs + comment replies...")
     sb = db.get_supabase()
     idle_ticks = 0
+    loop_ticks = 0
     while True:
         try:
+            loop_ticks += 1
+            # Auto-repair failed / stuck jobs every ~8 polls
+            if loop_ticks % 8 == 1:
+                try:
+                    n_failed = db.requeue_failed_jobs(sb)
+                    n_stuck = db.requeue_stuck_jobs(sb)
+                    if n_failed:
+                        print(f"[RETRY] requeued {n_failed} failed job(s)")
+                    if n_stuck:
+                        print(f"[RETRY] requeued {n_stuck} stuck job(s)")
+                except Exception as re:
+                    print(f"[RETRY] loop error: {re}")
+
             db.beat_presence(sb, working=False)
             worked = process_next_job()
             if worked:

@@ -26,15 +26,30 @@ __all__ = [
 ]
 
 
-def pick_transition(exclude: str | None = None) -> str:
-    pool = [t for t in TRANSITION_LIBRARY if t != exclude] or list(TRANSITION_LIBRARY)
+def pick_transition(
+    exclude: str | None = None,
+    *,
+    allowed: list[str] | None = None,
+) -> str:
+    base = list(allowed) if allowed else list(TRANSITION_LIBRARY)
+    # Keep only names FFmpeg xfade knows from our library
+    pool = [t for t in base if t in TRANSITION_LIBRARY] or list(TRANSITION_LIBRARY)
+    pool = [t for t in pool if t != exclude] or pool
     return random.choice(pool)
 
 
-def pick_motion(*, punch: bool = False) -> dict[str, str]:
+def pick_motion(
+    *,
+    punch: bool = False,
+    allowed_ids: list[str] | None = None,
+) -> dict[str, str]:
     if punch:
         return next(m for m in MOTION_PRESETS if m["id"] == "punch_in")
     body = [m for m in MOTION_PRESETS if m["id"] != "punch_in"]
+    if allowed_ids:
+        filtered = [m for m in body if m["id"] in allowed_ids]
+        if filtered:
+            body = filtered
     return random.choice(body)
 
 
@@ -278,6 +293,8 @@ def concat_with_pro_transitions(
     *,
     overlap: float = 0.55,
     size: tuple[int, int] | None = None,
+    allowed_transitions: list[str] | None = None,
+    transitions_enabled: bool = True,
 ) -> Path:
     """Crossfade clips with locked timebases + varied cinematic transitions."""
     if len(clips) == 1:
@@ -307,7 +324,13 @@ def concat_with_pro_transitions(
     last_transition: str | None = None
 
     for i in range(1, len(clips)):
-        transition = pick_transition(exclude=last_transition)
+        if transitions_enabled:
+            transition = pick_transition(
+                exclude=last_transition,
+                allowed=allowed_transitions,
+            )
+        else:
+            transition = "fade"
         last_transition = transition
         dur = min(overlap, max(0.35, min(durations[i], durations[i - 1]) * 0.25))
         dur = min(dur, 0.7)

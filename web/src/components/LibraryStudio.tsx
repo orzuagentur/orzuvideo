@@ -25,6 +25,15 @@ type FavoriteItem = {
   created_at: string;
 };
 
+type OpenMedia = {
+  title: string;
+  playUrl: string | null;
+  downloadUrl: string | null;
+  poster?: string | null;
+  kind: "video" | "photo" | "music" | "job";
+  studioHref?: string;
+};
+
 const JOB_SELECT =
   "id,status,title,script_text,description,youtube_url,youtube_video_id,error_message,scheduled_for,created_at,completed_at,thumbnail_url,preview_url,view_count,like_count,comment_count,duration_seconds,storage_path,storage_bucket,metadata";
 
@@ -52,6 +61,24 @@ function isCreativityJob(job: VideoJob) {
   const src = String(job.metadata?.source || "");
   const pipeline = String(job.metadata?.pipeline || "");
   return src === "creativity" || pipeline === "creativity";
+}
+
+async function downloadFromUrl(url: string, filename: string) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("download failed");
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 function FavHeart({
@@ -88,6 +115,112 @@ function FavHeart({
   );
 }
 
+function LibraryMediaModal({
+  media,
+  onClose,
+}: {
+  media: OpenMedia;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function onDownload() {
+    if (!media.downloadUrl) return;
+    setBusy(true);
+    const safe =
+      (media.title || "orzuai-media").replace(/[^\w.-]+/g, "_").slice(0, 80) +
+      (media.kind === "photo" ? ".jpg" : ".mp4");
+    await downloadFromUrl(media.downloadUrl, safe);
+    setBusy(false);
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-3"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="relative flex max-h-[92vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        aria-label={media.title}
+      >
+        <div className="flex items-center justify-between gap-2 border-b border-[color:var(--line)] px-3 py-2.5">
+          <p className="min-w-0 truncate text-sm font-semibold">
+            {media.title || "Untitled"}
+          </p>
+          <button
+            type="button"
+            aria-label="Close"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-[color:var(--muted)] hover:bg-white/5 hover:text-[color:var(--fg)]"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
+          {media.kind === "photo" && media.playUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={media.playUrl}
+              alt=""
+              className="max-h-[70vh] w-full object-contain"
+            />
+          ) : media.playUrl ? (
+            <video
+              key={media.playUrl}
+              src={media.playUrl}
+              poster={media.poster || undefined}
+              className="max-h-[70vh] w-full object-contain"
+              controls
+              playsInline
+              preload="metadata"
+              autoPlay
+            />
+          ) : (
+            <p className="p-8 text-center text-sm text-[color:var(--muted)]">
+              Preview is not available yet.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2 border-t border-[color:var(--line)] p-3">
+          {media.downloadUrl && (
+            <button
+              type="button"
+              className="btn btn-primary flex-1 text-sm"
+              disabled={busy}
+              onClick={() => void onDownload()}
+            >
+              {busy ? "Downloading…" : "Download"}
+            </button>
+          )}
+          {media.studioHref && (
+            <Link
+              href={media.studioHref}
+              className="btn btn-ghost flex-1 text-sm"
+              onClick={onClose}
+            >
+              Open studio
+            </Link>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function parseTab(raw: string | null): LibTab {
   if (raw === "videos" || raw === "favorites" || raw === "clips") return raw;
   return "clips";
@@ -102,6 +235,7 @@ export function LibraryStudio() {
   const [favKeys, setFavKeys] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  const [openMedia, setOpenMedia] = useState<OpenMedia | null>(null);
   const [audio] = useState(() =>
     typeof Audio !== "undefined" ? new Audio() : null,
   );
@@ -196,9 +330,8 @@ export function LibraryStudio() {
         asset_id,
         title: job.title || "Untitled",
         thumb: job.thumbnail_url,
-        preview_url: job.preview_url
-          ? `/api/jobs/${job.id}/preview`
-          : null,
+        preview_url: `/api/jobs/${job.id}/preview`,
+        download_url: `/api/jobs/${job.id}/preview?download=1`,
         duration_sec: job.duration_seconds,
       }),
     });
@@ -246,6 +379,68 @@ export function LibraryStudio() {
     audio.onended = () => setPlayingId(null);
   }
 
+  function openJob(job: VideoJob, studioHref: string) {
+    const canPlay = Boolean(job.preview_url || job.storage_path);
+    setOpenMedia({
+      title: job.title || "Untitled",
+      playUrl: canPlay ? `/api/jobs/${job.id}/preview` : null,
+      downloadUrl: canPlay
+        ? `/api/jobs/${job.id}/preview?download=1`
+        : null,
+      poster: job.thumbnail_url,
+      kind: "job",
+      studioHref,
+    });
+  }
+
+  function openFavorite(item: FavoriteItem) {
+    if (item.kind === "music") {
+      togglePlay(item);
+      return;
+    }
+
+    const jobMatch = item.preview_url?.match(/\/api\/jobs\/([^/?]+)/);
+    if (jobMatch || (item.kind === "video" && item.preview_url?.startsWith("/api/jobs/"))) {
+      const jobId = jobMatch?.[1] || item.asset_id;
+      setOpenMedia({
+        title: item.title || "Untitled",
+        playUrl: `/api/jobs/${jobId}/preview`,
+        downloadUrl: `/api/jobs/${jobId}/preview?download=1`,
+        poster: item.thumb,
+        kind: "video",
+      });
+      return;
+    }
+
+    const rawPlay = item.preview_url || item.download_url;
+    if (!rawPlay) {
+      toast("Preview is not available", "error");
+      return;
+    }
+
+    const mediaType = item.kind === "photo" ? "photo" : "video";
+    const playUrl = rawPlay.startsWith("/")
+      ? rawPlay
+      : `/api/media/download?url=${encodeURIComponent(rawPlay)}&type=${mediaType}&filename=${encodeURIComponent(item.title || item.asset_id)}&inline=1`;
+
+    const rawDl = item.download_url || item.preview_url;
+    const downloadUrl = !rawDl
+      ? null
+      : rawDl.startsWith("/api/")
+        ? rawDl.includes("download=1")
+          ? rawDl
+          : `${rawDl}${rawDl.includes("?") ? "&" : "?"}download=1`
+        : `/api/media/download?url=${encodeURIComponent(rawDl)}&type=${mediaType}&filename=${encodeURIComponent(item.title || item.asset_id)}`;
+
+    setOpenMedia({
+      title: item.title || "Untitled",
+      playUrl,
+      downloadUrl,
+      poster: item.thumb,
+      kind: item.kind === "photo" ? "photo" : "video",
+    });
+  }
+
   const jobList = tab === "clips" ? clips : tab === "videos" ? videos : [];
   const heading =
     tab === "clips"
@@ -272,16 +467,22 @@ export function LibraryStudio() {
             No favorites yet. Tap the heart on creators assets or your clips.
           </p>
         ) : (
-          <ul className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <ul className="grid w-full grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4">
             {favs.map((item) => {
               const dur = formatDuration(item.duration_sec);
               const playing = playingId === item.id;
+              const canOpen = item.kind !== "music";
               return (
                 <li
                   key={`${item.kind}:${item.asset_id}`}
                   className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
                 >
-                  <div className="relative aspect-square w-full bg-black/40">
+                  <button
+                    type="button"
+                    className="relative aspect-square w-full bg-black/40 text-left"
+                    onClick={() => openFavorite(item)}
+                    disabled={!canOpen && !item.preview_url}
+                  >
                     {item.thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -308,12 +509,20 @@ export function LibraryStudio() {
                                   onClick: () => togglePlay(item),
                                 },
                               ]
-                            : []),
-                          ...(item.download_url
+                            : [
+                                {
+                                  label: "Open",
+                                  onClick: () => openFavorite(item),
+                                },
+                              ]),
+                          ...(item.download_url ||
+                          item.preview_url?.startsWith("/api/jobs/")
                             ? [
                                 {
                                   label: "Download",
-                                  href: `/api/media/download?url=${encodeURIComponent(item.download_url)}&type=${item.kind === "music" ? "music" : item.kind === "photo" ? "photo" : "video"}&filename=${encodeURIComponent(item.title || item.asset_id)}`,
+                                  onClick: () => {
+                                    openFavorite(item);
+                                  },
                                 },
                               ]
                             : []),
@@ -328,8 +537,9 @@ export function LibraryStudio() {
                     <span className="absolute bottom-2 left-2 rounded bg-black/65 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white">
                       {item.kind}
                       {dur ? ` · ${dur}` : ""}
+                      {playing ? " · playing" : ""}
                     </span>
-                  </div>
+                  </button>
                   <div className="min-w-0 space-y-0.5 px-2.5 py-2">
                     <p className="truncate text-xs font-semibold">
                       {item.title || "Untitled"}
@@ -349,23 +559,28 @@ export function LibraryStudio() {
         <p className="rounded-2xl border border-dashed border-[color:var(--line)] p-10 text-center text-sm text-[color:var(--muted)]">
           {tab === "clips"
             ? "No AI clips yet. Create one in AI Clipping."
-            : "No AI videos yet. Create one in Creativity."}
+            : "No AI videos yet. Create one in AI Video."}
         </p>
       ) : (
-        <ul className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        <ul className="grid w-full grid-cols-2 gap-2.5 sm:gap-3 md:grid-cols-3 lg:grid-cols-4">
           {jobList.map((job) => {
             const dur = formatDuration(job.duration_seconds);
             const key = `video:${job.id}`;
             const liked = favKeys.has(key);
-            const href =
+            const studioHref =
               tab === "clips" ? `/dashboard/clipping` : `/dashboard/content`;
+            const canWatch = Boolean(job.preview_url || job.storage_path);
             return (
               <li
                 key={job.id}
                 className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
               >
-                <div className="relative aspect-[9/16] w-full bg-black/40">
-                  {job.thumbnail_url || job.preview_url ? (
+                <button
+                  type="button"
+                  className="relative aspect-[9/16] w-full bg-black/40 text-left"
+                  onClick={() => openJob(job, studioHref)}
+                >
+                  {job.thumbnail_url || canWatch ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={
@@ -387,17 +602,25 @@ export function LibraryStudio() {
                     <CardMenu
                       items={[
                         {
-                          label: "Open",
-                          href,
+                          label: "Watch",
+                          onClick: () => openJob(job, studioHref),
                         },
-                        ...(job.preview_url || job.storage_path
+                        ...(canWatch
                           ? [
                               {
-                                label: "Preview",
-                                href: `/api/jobs/${job.id}/preview`,
+                                label: "Download",
+                                onClick: () =>
+                                  void downloadFromUrl(
+                                    `/api/jobs/${job.id}/preview?download=1`,
+                                    `${(job.title || "video").replace(/[^\w.-]+/g, "_")}.mp4`,
+                                  ),
                               },
                             ]
                           : []),
+                        {
+                          label: "Open studio",
+                          href: studioHref,
+                        },
                       ]}
                     />
                   </CardMenuSlot>
@@ -405,22 +628,30 @@ export function LibraryStudio() {
                     {job.status}
                     {dur ? ` · ${dur}` : ""}
                   </span>
-                </div>
+                  {canWatch && (
+                    <span className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition hover:opacity-100">
+                      <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-black">
+                        Play
+                      </span>
+                    </span>
+                  )}
+                </button>
                 <div className="min-w-0 space-y-0.5 px-2.5 py-2">
                   <p className="truncate text-xs font-semibold">
                     {job.title || "Untitled"}
                   </p>
-                  <Link
-                    href={href}
-                    className="text-[11px] text-[color:var(--accent)] hover:underline"
-                  >
-                    Open studio
-                  </Link>
                 </div>
               </li>
             );
           })}
         </ul>
+      )}
+
+      {openMedia && (
+        <LibraryMediaModal
+          media={openMedia}
+          onClose={() => setOpenMedia(null)}
+        />
       )}
     </div>
   );

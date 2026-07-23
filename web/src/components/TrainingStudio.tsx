@@ -3,10 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { AiTraining, PublishSchedule } from "@/lib/types";
 import {
@@ -14,26 +16,20 @@ import {
   normalizeSchedule,
   scheduleDefaults,
 } from "@/components/ScheduleStudio";
-import { VoicePicker } from "@/components/VoicePicker";
-import { MusicTrainingStudio } from "@/components/MusicTrainingStudio";
+import { TrainingVoiceMusicCard } from "@/components/TrainingVoiceMusicCard";
+import {
+  normalizeSubtitleStyle,
+  SubtitleStylePicker,
+} from "@/components/SubtitleStylePicker";
 import { useToast } from "@/components/ToastNotice";
 import {
-  AUDIENCE_PRESETS,
-  BRAND_RULES_PRESETS,
-  CONTENT_TYPE_PRESETS,
   CTA_PRESETS,
   defaultDurationForFormat,
   durationPresetsForFormat,
-  HOOK_PRESETS,
   LANGUAGE_PRESETS,
   NICHE_PRESETS,
-  PEXELS_PRESETS,
   REPLY_STYLE_PRESETS,
-  STYLE_PROMPT_PRESETS,
-  SUBTITLE_PRESETS,
-  TONE_PRESETS,
   VIDEO_FORMAT_PRESETS,
-  VIDEO_STYLE_PRESETS,
   ensurePreset,
   type Preset,
 } from "@/lib/training-presets";
@@ -67,37 +63,52 @@ export function TrainingStudio({
   const searchParams = useSearchParams();
   const enableAiFlow = searchParams.get("enableAi") === "1";
 
-  const [form, setForm] = useState<AiTraining>({
-    ...trainingEmptyDefaults,
-    ...initial,
-    learning_enabled: false,
-    music_prefs: {
-      ...defaultMusicPrefs(),
-      ...(initial?.music_prefs || {}),
-      volume: clampMusicVolume(
+  const [form, setForm] = useState<AiTraining>(() => {
+    const merged = {
+      ...trainingEmptyDefaults,
+      ...initial,
+      learning_enabled: false,
+    };
+    const rawFormat = String(merged.video_format || "shorts");
+    const video_format =
+      rawFormat === "simple" || rawFormat === "shorts_mixer"
+        ? rawFormat === "shorts_mixer"
+          ? "shorts"
+          : "video"
+        : rawFormat === "video" || rawFormat === "shorts"
+          ? rawFormat
+          : "shorts";
+    return {
+      ...merged,
+      video_format,
+      subtitle_style: normalizeSubtitleStyle(merged.subtitle_style),
+      music_prefs: {
+        ...defaultMusicPrefs(),
+        ...(initial?.music_prefs || {}),
+        // AI picks tracks by niche — no manual library selection
+        active_group_id: "",
+        selected_track_ids: [],
+        volume: clampMusicVolume(
+          Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
+        ),
+        voice_volume: clampVoiceVolume(
+          Number(
+            initial?.voice_volume ??
+              initial?.music_prefs?.voice_volume ??
+              1.05,
+          ),
+        ),
+      },
+      music_group: "",
+      music_volume: clampMusicVolume(
         Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
       ),
       voice_volume: clampVoiceVolume(
         Number(
-          initial?.voice_volume ??
-            initial?.music_prefs?.voice_volume ??
-            1.05,
+          initial?.voice_volume ?? initial?.music_prefs?.voice_volume ?? 1.05,
         ),
       ),
-      active_group_id:
-        initial?.music_group ||
-        initial?.music_prefs?.active_group_id ||
-        "",
-    },
-    music_group: initial?.music_group || initial?.music_prefs?.active_group_id || "",
-    music_volume: clampMusicVolume(
-      Number(initial?.music_volume ?? initial?.music_prefs?.volume ?? 0.58),
-    ),
-    voice_volume: clampVoiceVolume(
-      Number(
-        initial?.voice_volume ?? initial?.music_prefs?.voice_volume ?? 1.05,
-      ),
-    ),
+    };
   });
   const [schedule, setSchedule] = useState<PublishSchedule>(() =>
     normalizeSchedule({
@@ -171,7 +182,9 @@ export function TrainingStudio({
     const musicPrefs: MusicPrefs = {
       ...defaultMusicPrefs(),
       ...(form.music_prefs || {}),
-      active_group_id: form.music_group || form.music_prefs?.active_group_id || "",
+      // AI picks music by niche — do not persist a user playlist
+      active_group_id: "",
+      selected_track_ids: [],
       volume: clampMusicVolume(Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58)),
       voice_volume: clampVoiceVolume(
         Number(form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05),
@@ -182,10 +195,10 @@ export function TrainingStudio({
       ...form,
       learning_enabled: false,
       enable_ai: enableAiFlow || undefined,
-      music_group: musicPrefs.active_group_id,
+      music_group: "",
       music_volume: musicPrefs.volume,
       voice_volume: musicPrefs.voice_volume,
-      music_mood: musicPrefs.active_group_id,
+      music_mood: form.niche || "",
       music_prefs: musicPrefs,
     };
 
@@ -355,53 +368,20 @@ export function TrainingStudio({
       </section>
 
       <div className="space-y-6">
-        <section className="panel rise space-y-5 p-6">
+        <section className="panel rise space-y-3 p-3 sm:space-y-4 sm:p-4">
           <SectionTitle
             title="Content"
-            subtitle="Fill in the required fields. The rest can be left empty."
+            subtitle="Niche, language, format, subtitles, and prompt."
             required
           />
-          <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
             <PresetSelect
               label="Niche"
               value={form.niche}
               presets={ensurePreset(NICHE_PRESETS, form.niche)}
               onChange={(v) => setTraining("niche", v)}
               required
-            />
-            <PresetSelect
-              label="Content type"
-              value={form.content_type}
-              presets={ensurePreset(CONTENT_TYPE_PRESETS, form.content_type)}
-              onChange={(v) => setTraining("content_type", v)}
-              optional
-            />
-            <PresetSelect
-              label="Format"
-              value={form.video_format}
-              presets={ensurePreset(VIDEO_FORMAT_PRESETS, form.video_format)}
-              onChange={(v) => {
-                const next = { ...form, video_format: v };
-                const allowed = durationPresetsForFormat(v).map((p) => p.value);
-                if (!allowed.includes(String(form.duration_seconds))) {
-                  next.duration_seconds = defaultDurationForFormat(v);
-                }
-                setForm(next);
-              }}
-            />
-            <PresetSelect
-              label="Edit style"
-              value={form.video_style}
-              presets={ensurePreset(VIDEO_STYLE_PRESETS, form.video_style)}
-              onChange={(v) => setTraining("video_style", v)}
-              optional
-            />
-            <PresetSelect
-              label="Tone"
-              value={form.tone}
-              presets={ensurePreset(TONE_PRESETS, form.tone)}
-              onChange={(v) => setTraining("tone", v)}
-              optional
+              compact
             />
             <PresetSelect
               label="Language"
@@ -409,13 +389,23 @@ export function TrainingStudio({
               presets={ensurePreset(LANGUAGE_PRESETS, form.language)}
               onChange={(v) => setTraining("language", v)}
               required
+              compact
             />
             <PresetSelect
-              label="Audience"
-              value={form.target_audience}
-              presets={ensurePreset(AUDIENCE_PRESETS, form.target_audience)}
-              onChange={(v) => setTraining("target_audience", v)}
-              optional
+              label="Format"
+              value={form.video_format}
+              presets={VIDEO_FORMAT_PRESETS}
+              onChange={(v) => {
+                const next = { ...form, video_format: v };
+                const allowed = durationPresetsForFormat(v).map((p) => p.value);
+                if (!allowed.includes(String(form.duration_seconds))) {
+                  next.duration_seconds = defaultDurationForFormat(v);
+                }
+                setForm(next);
+                markDirty(next, schedule);
+              }}
+              compact
+              fixedOptions
             />
             <PresetSelect
               label="Duration"
@@ -425,109 +415,96 @@ export function TrainingStudio({
                 String(form.duration_seconds),
               )}
               onChange={(v) => setTraining("duration_seconds", Number(v))}
-            />
-            <PresetSelect
-              label="Hook"
-              value={form.hook_style}
-              presets={ensurePreset(HOOK_PRESETS, form.hook_style)}
-              onChange={(v) => setTraining("hook_style", v)}
-              optional
-            />
-            <PresetSelect
-              label="CTA"
-              value={form.cta}
-              presets={ensurePreset(CTA_PRESETS, form.cta)}
-              onChange={(v) => setTraining("cta", v)}
-              optional
-              hint="AI will translate the CTA into the selected language"
-            />
-          </div>
-
-          <div className="space-y-2 border-t border-[color:var(--line)] pt-5">
-            <PresetSelect
-              label="Script style"
-              value={form.style_prompt}
-              presets={ensurePreset(STYLE_PROMPT_PRESETS, form.style_prompt)}
-              onChange={(v) => setTraining("style_prompt", v)}
-              multiline
-              required
-            />
-          </div>
-        </section>
-
-        <section className="panel rise space-y-5 p-6">
-          <SectionTitle title="Voice" required />
-          <VoicePicker
-            value={form.voice_id}
-            onChange={(v) => setTraining("voice_id", v)}
-          />
-          <div className="grid gap-5 border-t border-[color:var(--line)] pt-5 sm:grid-cols-2">
-            <PresetSelect
-              label="Subtitles"
-              value={form.subtitle_style}
-              presets={ensurePreset(SUBTITLE_PRESETS, form.subtitle_style)}
-              onChange={(v) => setTraining("subtitle_style", v)}
-              optional
+              compact
             />
             <div className="sm:col-span-2">
               <PresetSelect
-                label="B-roll"
-                value={form.pexels_query}
-                presets={ensurePreset(PEXELS_PRESETS, form.pexels_query)}
-                onChange={(v) => setTraining("pexels_query", v)}
+                label="CTA"
+                value={form.cta}
+                presets={ensurePreset(CTA_PRESETS, form.cta)}
+                onChange={(v) => setTraining("cta", v)}
                 optional
+                compact
               />
             </div>
           </div>
+
+          <SubtitleStylePicker
+            value={form.subtitle_style}
+            onChange={(id) => setTraining("subtitle_style", id)}
+            disabled={busy}
+          />
+
+          <div className="space-y-1.5 border-t border-[color:var(--line)] pt-3">
+            <label className="block space-y-1">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--muted)]">
+                Prompt{" "}
+                <span className="font-normal normal-case tracking-normal opacity-70">
+                  (optional)
+                </span>
+              </span>
+              <AutoGrowTextarea
+                className="field w-full resize-none text-sm"
+                value={form.style_prompt}
+                onChange={(v) => setTraining("style_prompt", v)}
+                placeholder="Extra info for AI — tone, topics, what to avoid…"
+                maxLength={2000}
+                minRows={2}
+              />
+            </label>
+          </div>
         </section>
 
-        <MusicTrainingStudio
+        <TrainingVoiceMusicCard
           voiceId={form.voice_id}
-          required
-          value={{
-            ...defaultMusicPrefs(),
-            ...(form.music_prefs || {}),
-            active_group_id:
-              form.music_group || form.music_prefs?.active_group_id || "",
-            volume: clampMusicVolume(
-              Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58),
-            ),
-            voice_volume: clampVoiceVolume(
-              Number(
-                form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05,
-              ),
-            ),
-          }}
-          onChange={(next) => {
+          onVoiceChange={(v) => setTraining("voice_id", v)}
+          musicVolume={Number(form.music_volume ?? form.music_prefs?.volume ?? 0.58)}
+          voiceVolume={Number(
+            form.voice_volume ?? form.music_prefs?.voice_volume ?? 1.05,
+          )}
+          onMusicVolumeChange={(v) => {
             setForm((prev) => {
               const updated = {
                 ...prev,
-                music_group: next.active_group_id,
-                music_volume: next.volume,
-                voice_volume: next.voice_volume,
-                music_mood: next.active_group_id,
-                music_prefs: next,
+                music_volume: v,
+                music_prefs: {
+                  ...defaultMusicPrefs(),
+                  ...(prev.music_prefs || {}),
+                  active_group_id: "",
+                  selected_track_ids: [],
+                  volume: v,
+                  voice_volume: clampVoiceVolume(
+                    Number(
+                      prev.voice_volume ?? prev.music_prefs?.voice_volume ?? 1.05,
+                    ),
+                  ),
+                },
+              };
+              markDirty(updated, schedule);
+              return updated;
+            });
+          }}
+          onVoiceVolumeChange={(v) => {
+            setForm((prev) => {
+              const updated = {
+                ...prev,
+                voice_volume: v,
+                music_prefs: {
+                  ...defaultMusicPrefs(),
+                  ...(prev.music_prefs || {}),
+                  active_group_id: "",
+                  selected_track_ids: [],
+                  volume: clampMusicVolume(
+                    Number(prev.music_volume ?? prev.music_prefs?.volume ?? 0.58),
+                  ),
+                  voice_volume: v,
+                },
               };
               markDirty(updated, schedule);
               return updated;
             });
           }}
         />
-
-        <section className="panel rise space-y-5 p-6">
-          <SectionTitle
-            title="Brand rules"
-            subtitle="Optional - can be left empty"
-          />
-          <PresetSelect
-            label="Preset"
-            value={form.brand_rules}
-            presets={ensurePreset(BRAND_RULES_PRESETS, form.brand_rules)}
-            onChange={(v) => setTraining("brand_rules", v)}
-            multiline
-            optional
-          />
-        </section>
 
         <section className="panel rise space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
@@ -600,77 +577,73 @@ export function TrainingStudio({
         </section>
       </div>
 
-      {/* Floating checklist FAB — bottom right */}
-      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-40 flex flex-col items-end gap-2 sm:right-5 lg:bottom-6 lg:right-6">
-        {checklistOpen && (
-          <div
-            className="w-[min(100vw-2.5rem,280px)] rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-4 shadow-2xl backdrop-blur-md"
-            role="dialog"
-            aria-label="Required checklist"
-          >
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">Required</p>
-              <span className="text-xs tabular-nums text-[color:var(--muted)]">
-                {checklistDone}/{checklist.length}
-              </span>
+      {/* Floating checklist — hidden when everything required is done */}
+      {!requiredOk && (
+        <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-40 flex flex-col items-end gap-2 sm:right-5 lg:bottom-6 lg:right-6">
+          {checklistOpen && (
+            <div
+              className="w-[min(100vw-2.5rem,280px)] rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-4 shadow-2xl backdrop-blur-md"
+              role="dialog"
+              aria-label="Required checklist"
+            >
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Required</p>
+                <span className="text-xs tabular-nums text-[color:var(--muted)]">
+                  {checklistDone}/{checklist.length}
+                </span>
+              </div>
+              <ul className="space-y-2">
+                {checklist.map((item) => (
+                  <li
+                    key={item.key}
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    <span
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]"
+                      style={{
+                        background: item.done
+                          ? "rgba(74,222,128,0.2)"
+                          : "rgba(255,255,255,0.06)",
+                        color: item.done ? "var(--success)" : "var(--muted)",
+                        border: `1px solid ${
+                          item.done
+                            ? "rgba(74,222,128,0.45)"
+                            : "var(--line)"
+                        }`,
+                      }}
+                    >
+                      {item.done ? "✓" : ""}
+                    </span>
+                    <span
+                      style={{
+                        color: item.done ? "var(--fg)" : "var(--muted)",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
-            <ul className="space-y-2">
-              {checklist.map((item) => (
-                <li
-                  key={item.key}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <span
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px]"
-                    style={{
-                      background: item.done
-                        ? "rgba(74,222,128,0.2)"
-                        : "rgba(255,255,255,0.06)",
-                      color: item.done ? "var(--success)" : "var(--muted)",
-                      border: `1px solid ${
-                        item.done
-                          ? "rgba(74,222,128,0.45)"
-                          : "var(--line)"
-                      }`,
-                    }}
-                  >
-                    {item.done ? "✓" : ""}
-                  </span>
-                  <span
-                    style={{
-                      color: item.done ? "var(--fg)" : "var(--muted)",
-                    }}
-                  >
-                    {item.label}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-3 text-[11px] leading-snug text-[color:var(--muted)]">
-              Optional fields can be left empty. AI texts will be in
-              the selected Language.
-            </p>
-          </div>
-        )}
-        <button
-          type="button"
-          aria-label="Required checklist"
-          aria-expanded={checklistOpen}
-          onClick={() => setChecklistOpen((v) => !v)}
-          className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105"
-          style={{
-            background: requiredOk
-              ? "linear-gradient(135deg, var(--accent-dim), var(--accent))"
-              : "rgba(232,165,75,0.25)",
-            border: "1px solid rgba(232,165,75,0.55)",
-            color: requiredOk ? "#1a1208" : "var(--accent)",
-          }}
-        >
-          <span className="font-[family-name:var(--font-syne)] text-sm font-bold tabular-nums">
-            {checklistDone}/{checklist.length}
-          </span>
-        </button>
-      </div>
+          )}
+          <button
+            type="button"
+            aria-label="Required checklist"
+            aria-expanded={checklistOpen}
+            onClick={() => setChecklistOpen((v) => !v)}
+            className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition hover:scale-105"
+            style={{
+              background: "rgba(232,165,75,0.25)",
+              border: "1px solid rgba(232,165,75,0.55)",
+              color: "var(--accent)",
+            }}
+          >
+            <span className="font-[family-name:var(--font-syne)] text-sm font-bold tabular-nums">
+              {checklistDone}/{checklist.length}
+            </span>
+          </button>
+        </div>
+      )}
 
       {leavePrompt !== null && (
         <UnsavedCard
@@ -746,6 +719,49 @@ function UnsavedCard({
   );
 }
 
+function AutoGrowTextarea({
+  value,
+  onChange,
+  placeholder,
+  maxLength,
+  minRows = 2,
+  className = "",
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  maxLength?: number;
+  minRows?: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const syncHeight = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const line = 22;
+    const minH = minRows * line + 16;
+    el.style.height = `${Math.max(minH, el.scrollHeight)}px`;
+  }, [minRows]);
+
+  useLayoutEffect(() => {
+    syncHeight();
+  }, [value, syncHeight]);
+
+  return (
+    <textarea
+      ref={ref}
+      className={className}
+      value={value}
+      placeholder={placeholder}
+      maxLength={maxLength}
+      rows={minRows}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
 function SectionTitle({
   title,
   subtitle,
@@ -757,7 +773,7 @@ function SectionTitle({
 }) {
   return (
     <div>
-      <h2 className="text-lg font-semibold">
+      <h2 className="text-base font-semibold sm:text-lg">
         {title}
         {required ? (
           <span className="ml-1" style={{ color: "var(--accent)" }} aria-hidden>
@@ -766,7 +782,9 @@ function SectionTitle({
         ) : null}
       </h2>
       {subtitle ? (
-        <p className="mt-0.5 text-sm text-[color:var(--muted)]">{subtitle}</p>
+        <p className="mt-0.5 text-xs text-[color:var(--muted)] sm:text-sm">
+          {subtitle}
+        </p>
       ) : null}
     </div>
   );
@@ -781,6 +799,9 @@ function PresetSelect({
   optional = false,
   required = false,
   hint,
+  compact = false,
+  /** Only the given presets — no Own / Not set */
+  fixedOptions = false,
 }: {
   label: string;
   value: string;
@@ -790,18 +811,125 @@ function PresetSelect({
   optional?: boolean;
   required?: boolean;
   hint?: string;
+  compact?: boolean;
+  fixedOptions?: boolean;
 }) {
   const empty = !value;
   const inList = !empty && presets.some((p) => p.value === value);
-  const [custom, setCustom] = useState(!empty && !inList);
+  const [ownMode, setOwnMode] = useState(!fixedOptions && !empty && !inList);
+  const [open, setOpen] = useState(false);
+  const [draftOwn, setDraftOwn] = useState(value);
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const selected = presets.find((p) => p.value === value);
+  const display = fixedOptions
+    ? selected?.label || presets[0]?.label || value
+    : ownMode
+      ? value || "+ Own"
+      : selected?.label ||
+        (empty ? (required ? "Choose…" : "Not set") : value);
 
   useEffect(() => {
-    if (empty) setCustom(false);
-  }, [empty]);
+    if (fixedOptions) {
+      setOwnMode(false);
+      return;
+    }
+    if (empty) setOwnMode(false);
+  }, [empty, fixedOptions]);
+
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    function place() {
+      const btn = btnRef.current;
+      if (!btn) return;
+      const rect = btn.getBoundingClientRect();
+      const width = Math.min(Math.max(rect.width, 200), window.innerWidth - 24);
+      let left = rect.left;
+      let top = rect.bottom + 6;
+      left = Math.min(left, window.innerWidth - width - 12);
+      left = Math.max(12, left);
+      const popH = fixedOptions ? 140 : 240;
+      if (top + popH > window.innerHeight - 12) {
+        top = Math.max(12, rect.top - popH - 6);
+      }
+      setPos({ top, left, width });
+    }
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, ownMode, fixedOptions]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t)) return;
+      if (popRef.current?.contains(t)) return;
+      setOpen(false);
+      if (!fixedOptions) {
+        setOwnMode(!empty && !presets.some((p) => p.value === value));
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, empty, presets, value, fixedOptions]);
+
+  function pick(v: string) {
+    setOwnMode(false);
+    onChange(v);
+    setOpen(false);
+  }
+
+  function applyOwn() {
+    const v = draftOwn.trim();
+    if (!v) return;
+    onChange(v);
+    setOwnMode(true);
+    setOpen(false);
+  }
+
+  const options: Preset[] = fixedOptions
+    ? presets
+    : [
+        ...((optional || !required)
+          ? [{ value: "", label: "— Not set —" }]
+          : []),
+        ...presets,
+        { value: "__own__", label: "+ Own" },
+      ];
 
   return (
-    <div className="space-y-2">
-      <span className="text-sm font-medium text-[color:var(--muted)]">
+    <div
+      className={
+        compact
+          ? "space-y-1 rounded-xl border border-[color:var(--line)] bg-black/20 px-2.5 py-2"
+          : "space-y-2"
+      }
+    >
+      <span
+        className={
+          compact
+            ? "text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--muted)]"
+            : "text-sm font-medium text-[color:var(--muted)]"
+        }
+      >
         {label}
         {required ? (
           <span className="ml-1" style={{ color: "var(--accent)" }} aria-hidden>
@@ -809,51 +937,170 @@ function PresetSelect({
           </span>
         ) : null}
         {optional && !required ? (
-          <span className="ml-1 font-normal opacity-70">(optional)</span>
+          <span className="ml-1 font-normal normal-case tracking-normal opacity-70">
+            (optional)
+          </span>
         ) : null}
       </span>
-      <select
-        className="field text-[15px]"
-        value={custom ? "__own__" : empty ? "" : value}
-        onChange={(e) => {
-          if (e.target.value === "__own__") {
-            setCustom(true);
-            return;
+
+      <button
+        ref={btnRef}
+        type="button"
+        className={
+          compact
+            ? "flex w-full items-center justify-between gap-2 rounded-lg border border-[color:var(--line)] bg-[color:var(--bg-elevated)] px-2.5 py-1.5 text-left text-sm transition hover:border-[color:rgba(232,165,75,0.4)]"
+            : "field !py-2 flex w-full items-center justify-between gap-2 text-left text-[15px]"
+        }
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => {
+          if (!fixedOptions) {
+            const preset = presets.some((p) => p.value === value);
+            setDraftOwn(preset ? "" : value);
+            setOwnMode(!empty && !preset);
           }
-          setCustom(false);
-          onChange(e.target.value);
+          setOpen((v) => !v);
         }}
       >
-        {(optional || !required) && (
-          <option value="">— Not set —</option>
-        )}
-        {required && empty && <option value="">— Choose —</option>}
-        {presets.map((p) => (
-          <option key={p.value} value={p.value} title={p.label}>
-            {p.label}
-          </option>
-        ))}
-        <option value="__own__">+ Own</option>
-      </select>
-      {hint && (
+        <span
+          className={`min-w-0 truncate ${empty && !ownMode && !fixedOptions ? "text-[color:var(--muted)]" : ""}`}
+        >
+          {display}
+        </span>
+        <span
+          className="shrink-0 text-[10px] text-[color:var(--muted)]"
+          style={{
+            transform: open ? "rotate(180deg)" : undefined,
+            transition: "transform 0.15s ease",
+          }}
+        >
+          ▾
+        </span>
+      </button>
+
+      {hint && !compact && (
         <p className="text-[11px] text-[color:var(--muted)]">{hint}</p>
       )}
-      {custom &&
-        (multiline ? (
-          <textarea
-            className="field min-h-24 text-[15px] leading-relaxed"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="Your value"
-          />
-        ) : (
-          <input
-            className="field text-[15px]"
-            value={inList ? "" : value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="Your value"
-          />
-        ))}
+
+      {open &&
+        pos &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={popRef}
+            className="overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1.5 shadow-2xl"
+            style={{
+              position: "fixed",
+              top: pos.top,
+              left: pos.left,
+              width: pos.width,
+              zIndex: 200,
+              maxHeight: fixedOptions ? 140 : 240,
+            }}
+            role="listbox"
+            aria-label={label}
+          >
+            <div
+              className={`space-y-0.5 overflow-y-auto overscroll-contain ${
+                fixedOptions ? "max-h-[120px]" : "max-h-[220px]"
+              }`}
+            >
+              {options.map((o) => {
+                const isOwn = o.value === "__own__";
+                const active = isOwn
+                  ? ownMode
+                  : !ownMode && o.value === value;
+
+                if (isOwn && ownMode) {
+                  return (
+                    <div
+                      key="__own__"
+                      className="space-y-2 rounded-lg px-2 py-2"
+                      style={{ background: "rgba(232,165,75,0.1)" }}
+                    >
+                      <p className="px-1 text-xs font-semibold text-[color:var(--accent)]">
+                        + Own
+                      </p>
+                      {multiline ? (
+                        <textarea
+                          className="field min-h-16 text-sm"
+                          autoFocus
+                          placeholder="Your value"
+                          value={draftOwn}
+                          onChange={(e) => setDraftOwn(e.target.value)}
+                        />
+                      ) : (
+                        <input
+                          className="field !py-1.5 text-sm"
+                          autoFocus
+                          placeholder="Your value"
+                          value={draftOwn}
+                          onChange={(e) => setDraftOwn(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              applyOwn();
+                            }
+                          }}
+                        />
+                      )}
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-ghost px-2.5 py-1 text-xs"
+                          onClick={() => setOwnMode(false)}
+                        >
+                          Back
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary px-2.5 py-1 text-xs"
+                          onClick={applyOwn}
+                        >
+                          OK
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <button
+                    key={o.value || "__empty__"}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    className="block w-full rounded-lg px-2.5 py-2 text-left text-sm transition"
+                    style={{
+                      background: active
+                        ? "rgba(232,165,75,0.18)"
+                        : "transparent",
+                      color: isOwn
+                        ? "var(--accent)"
+                        : active
+                          ? "var(--accent)"
+                          : o.value === ""
+                            ? "var(--muted)"
+                            : "var(--fg)",
+                      fontWeight: isOwn || active ? 600 : undefined,
+                    }}
+                    onClick={() => {
+                      if (isOwn) {
+                        setOwnMode(true);
+                        setDraftOwn(inList ? "" : value);
+                        return;
+                      }
+                      pick(o.value);
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

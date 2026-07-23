@@ -4,9 +4,7 @@ import type { AiTraining } from "@/lib/types";
 export const TRAINING_REQUIRED = [
   { key: "language" as const, label: "Language" },
   { key: "voice_id" as const, label: "Voice" },
-  { key: "music" as const, label: "Music" },
   { key: "niche" as const, label: "Niche" },
-  { key: "style_prompt" as const, label: "Script style" },
 ] as const;
 
 /** Optional text fields — empty = omit from worker prompt. */
@@ -20,28 +18,16 @@ export const TRAINING_OPTIONAL_TEXT = [
   "pexels_query",
   "music_mood",
   "video_style",
+  "style_prompt",
   "reply_style_prompt",
 ] as const;
 
 export type TrainingRequiredKey = (typeof TRAINING_REQUIRED)[number]["key"];
 
-export function musicTrainingDone(
-  form: Pick<AiTraining, "music_prefs" | "music_group">,
-): boolean {
-  const selected = form.music_prefs?.selected_track_ids?.length ?? 0;
-  if (selected > 0) return true;
-  // Genre from own library is enough — worker matches by genre + mood
-  return Boolean(String(form.music_group || "").trim());
-}
-
 export function trainingFieldFilled(
-  form: Pick<
-    AiTraining,
-    "language" | "voice_id" | "niche" | "style_prompt" | "music_prefs" | "music_group"
-  >,
+  form: Pick<AiTraining, "language" | "voice_id" | "niche">,
   key: TrainingRequiredKey,
 ): boolean {
-  if (key === "music") return musicTrainingDone(form);
   const v = form[key];
   return typeof v === "string" && v.trim().length > 0;
 }
@@ -80,7 +66,7 @@ export const trainingEmptyDefaults: AiTraining = {
     custom_groups: [],
   },
   voice_id: "",
-  subtitle_style: "karaoke_bold",
+  subtitle_style: "classic",
   duration_seconds: 45,
   video_format: "shorts",
   video_style: "",
