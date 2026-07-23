@@ -601,7 +601,7 @@ export function TrainingStudio({
       </div>
 
       {/* Floating checklist FAB — bottom right */}
-      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-2 sm:bottom-6 sm:right-6">
+      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-40 flex flex-col items-end gap-2 sm:right-5 lg:bottom-6 lg:right-6">
         {checklistOpen && (
           <div
             className="w-[min(100vw-2.5rem,280px)] rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 p-4 shadow-2xl backdrop-blur-md"

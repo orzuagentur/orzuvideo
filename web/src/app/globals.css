@@ -10,6 +10,7 @@
   --accent-dim: #b8792a;
   --success: #5ecf8a;
   --danger: #e86a5a;
+  --mobile-nav-space: calc(5.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 @theme inline {
@@ -33,6 +34,7 @@
 html,
 body {
   min-height: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -43,6 +45,8 @@ body {
     var(--bg);
   color: var(--fg);
   font-family: var(--font-dm-sans), system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  text-size-adjust: 100%;
 }
 
 a {
@@ -96,6 +100,23 @@ select.field option {
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease, background 0.15s ease;
+  min-height: 44px;
+}
+
+@media (max-width: 639px) {
+  .btn {
+    padding: 0.75rem 1.1rem;
+    font-size: 0.9rem;
+  }
+
+  .field {
+    padding: 0.75rem 0.9rem;
+    font-size: 16px; /* avoid iOS zoom on focus */
+  }
+
+  .panel {
+    border-radius: 14px;
+  }
 }
 
 .btn:hover {

@@ -11,7 +11,7 @@ export function MusicUploadDock() {
   if (!cards.length) return null;
 
   return (
-    <div className="pointer-events-none fixed bottom-[5.75rem] right-4 z-[90] flex w-[min(100vw-2rem,320px)] flex-col gap-2 sm:bottom-28 sm:right-6">
+    <div className="pointer-events-none fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[90] flex w-[min(100vw-1.5rem,320px)] flex-col gap-2 sm:right-4 lg:bottom-28 lg:right-6">
       {cards.map((job) => {
         const pct = job.pct ?? 0;
         const running = job.status === "running";

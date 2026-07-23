@@ -106,7 +106,7 @@ export function ClippingProgressDock() {
   const busy = QUEUE_STATUSES.has(primary.status);
 
   return (
-    <div className="fixed bottom-4 right-4 z-[85] w-[min(100%-2rem,300px)] sm:bottom-6 sm:right-6">
+    <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[85] w-[min(100%-1.5rem,300px)] sm:right-4 lg:bottom-6 lg:right-6">
       <div
         className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]/95 shadow-2xl backdrop-blur-md"
         role="status"

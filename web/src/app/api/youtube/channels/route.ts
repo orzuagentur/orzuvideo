@@ -5,6 +5,8 @@ import {
   listYoutubeChannels,
   setActiveYoutubeChannel,
 } from "@/lib/youtube-channels";
+import { findOtherChannelOwner } from "@/lib/youtube-channel-transfer";
+import { notifyYoutubeChannelConnected } from "@/lib/youtube-notify";
 
 export type YtChannel = {
   id: string;
@@ -185,6 +187,27 @@ export async function POST(request: Request) {
       );
     }
 
+    const other = await findOtherChannelOwner(match.id, user.id);
+    if (other) {
+      const alreadyMine = (await listYoutubeChannels(user.id)).some(
+        (c) => c.channel_id === match.id,
+      );
+      if (!alreadyMine) {
+        return NextResponse.json(
+          {
+            error: "channel_owned",
+            message:
+              "This YouTube channel is already connected to another OrzuAi account.",
+            channelId: match.id,
+            channelTitle: match.title,
+            thumbnail: match.thumbnail,
+            ownerEmail: other.email,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     const { data: profile } = await supabase
       .from("profiles")
       .select(
@@ -235,6 +258,20 @@ export async function POST(request: Request) {
         youtube_stats_synced_at: new Date().toISOString(),
       })
       .eq("id", user.id);
+
+    const { data: me } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    void notifyYoutubeChannelConnected({
+      channelId: match.id,
+      channelTitle: match.title,
+      accessToken,
+      connectedByUserId: user.id,
+      connectedByEmail: me?.email || user.email || null,
+    }).catch((e) => console.error("youtube connect notify failed", e));
 
     return NextResponse.json({
       ok: true,

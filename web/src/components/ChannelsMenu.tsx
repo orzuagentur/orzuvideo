@@ -85,7 +85,7 @@ export function ChannelsMenu({
   return (
     <div
       ref={rootRef}
-      className="absolute left-0 top-full z-[70] mt-1.5 w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl"
+      className="absolute left-0 right-0 top-full z-[70] mt-1.5 w-full overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl sm:right-auto sm:w-[min(100vw-2rem,280px)] sm:rounded-xl"
       role="dialog"
       aria-label="YouTube channels"
     >

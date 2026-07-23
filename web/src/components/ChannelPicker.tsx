@@ -49,7 +49,13 @@ export function ChannelPicker() {
           data.available?.[0]?.id ||
           null,
       );
-      if (data.googleError && !(data.available || []).length) {
+      // Empty available = no YouTube channel (show create card), not a hard error
+      if (
+        data.googleError &&
+        !(data.available || []).length &&
+        !(data.saved || []).length &&
+        String(data.googleError).toLowerCase().includes("connect")
+      ) {
         setError(data.googleError);
       }
     })();
@@ -72,8 +78,23 @@ export function ChannelPicker() {
     });
     const data = await res.json();
     setSaving(false);
+    if (res.status === 409 && data.error === "channel_owned") {
+      const q = new URLSearchParams({
+        youtube: "transfer",
+        channelId: String(data.channelId || selectedId),
+        title: String(data.channelTitle || "YouTube channel"),
+        ...(data.thumbnail ? { thumb: String(data.thumbnail) } : {}),
+        ...(data.ownerEmail ? { from: String(data.ownerEmail) } : {}),
+      });
+      router.push(`/dashboard?${q.toString()}`);
+      return;
+    }
     if (!res.ok) {
-      setError(data.error || "Could not save channel");
+      setError(
+        data.error === "channel_owned"
+          ? data.message || "Channel already connected elsewhere"
+          : data.error || "Could not save channel",
+      );
       return;
     }
     router.push("/dashboard/channel");
@@ -134,6 +155,31 @@ export function ChannelPicker() {
           <a href="/api/youtube/connect" className="btn btn-primary text-sm">
             Connect Google
           </a>
+        </div>
+      )}
+
+      {!loading && available.length === 0 && !error && (
+        <div className="space-y-3 rounded-xl border border-[color:var(--line)] p-4">
+          <p className="text-sm font-semibold">No YouTube channel on this account</p>
+          <p className="text-sm text-[color:var(--muted)]">
+            This Google account does not have a YouTube channel yet. Create one,
+            then we will connect it automatically.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary text-sm"
+            disabled={saving}
+            onClick={() => {
+              window.open(
+                "https://www.youtube.com/create_channel",
+                "orzuai_yt_create",
+                "width=980,height=720,menubar=no,toolbar=no",
+              );
+              router.push("/dashboard?youtube=no_channel");
+            }}
+          >
+            Create channel
+          </button>
         </div>
       )}
 

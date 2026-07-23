@@ -328,7 +328,7 @@ export function CreatorsStudio() {
       {/* Sticky toolbar — YouTube + search */}
       <form
         onSubmit={onSearch}
-        className="sticky top-[5.75rem] z-40 -mx-4 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-4 py-3 backdrop-blur-md md:top-[6.25rem] md:-mx-6 md:px-6"
+        className="sticky top-14 z-40 -mx-3 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-3 py-2.5 backdrop-blur-md sm:top-[5.75rem] sm:-mx-4 sm:px-4 sm:py-3 md:top-[6.25rem] md:-mx-6 md:px-6"
       >
         <YouTubeChannelsButton />
 

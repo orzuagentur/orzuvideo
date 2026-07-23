@@ -402,7 +402,7 @@ export function ChannelStudio({
   if (!profile?.youtube_connected) {
     return (
       <div className="panel rise space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Home</h1>
+        <h1 className="text-xl font-semibold sm:text-2xl">Home</h1>
         <p className="text-sm text-[color:var(--muted)]">
           Connect a YouTube channel to publish videos and see stats. Use the red
           YouTube button above to connect or switch channels.
@@ -648,23 +648,23 @@ export function ChannelStudio({
           <div className="absolute inset-0 bg-gradient-to-t from-[color:var(--bg-elevated)] via-transparent to-black/20" />
         </div>
 
-        <div className="relative -mt-10 space-y-4 px-5 pb-5 sm:px-6">
-          <div className="flex flex-wrap items-end gap-4">
+        <div className="relative -mt-10 space-y-4 px-3 pb-4 sm:px-6 sm:pb-5">
+          <div className="flex flex-wrap items-end gap-3 sm:gap-4">
             {channelStats.thumbnailUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={channelStats.thumbnailUrl}
                 alt=""
-                className="h-20 w-20 rounded-full border-4 border-[color:var(--bg-elevated)] object-cover"
+                className="h-16 w-16 rounded-full border-4 border-[color:var(--bg-elevated)] object-cover sm:h-20 sm:w-20"
               />
             ) : (
-              <div className="flex h-20 w-20 items-center justify-center rounded-full border-4 border-[color:var(--bg-elevated)] bg-black/40 text-sm">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full border-4 border-[color:var(--bg-elevated)] bg-black/40 text-sm sm:h-20 sm:w-20">
                 YT
               </div>
             )}
             <div className="min-w-0 flex-1 pb-1">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-xl font-semibold">
+                <h2 className="truncate text-lg font-semibold sm:text-xl">
                   {channelStats.title || "YouTube channel"}
                 </h2>
                 {unauthorized && (
@@ -738,7 +738,7 @@ export function ChannelStudio({
       </section>
 
       {activeJobs.length > 0 && (
-        <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex w-[min(100%-2rem,300px)] flex-col gap-2 sm:bottom-6 sm:right-6">
+        <div className="pointer-events-none fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-40 flex w-[min(100%-1.5rem,300px)] flex-col gap-2 sm:right-4 lg:bottom-6 lg:right-6">
           {activeJobs.map((job) => {
             const pct = jobProgressPercent(job.status);
             return (
@@ -857,9 +857,11 @@ function Stat({ label, value }: { label: string; value: number }) {
         ? `${(value / 1_000).toFixed(1)}K`
         : String(value);
   return (
-    <div className="rounded-xl border border-[color:var(--line)] px-2 py-3">
-      <p className="text-lg font-semibold tabular-nums">{text}</p>
-      <p className="text-[11px] text-[color:var(--muted)]">{label}</p>
+    <div className="rounded-xl border border-[color:var(--line)] px-1.5 py-2.5 sm:px-2 sm:py-3">
+      <p className="text-base font-semibold tabular-nums sm:text-lg">{text}</p>
+      <p className="truncate text-[10px] text-[color:var(--muted)] sm:text-[11px]">
+        {label}
+      </p>
     </div>
   );
 }

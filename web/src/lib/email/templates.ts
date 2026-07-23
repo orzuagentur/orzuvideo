@@ -8,7 +8,9 @@ export type EmailTemplateId =
   | "login_otp"
   | "password_reset"
   | "password_reset_success"
-  | "new_device_login";
+  | "new_device_login"
+  | "youtube_channel_connected"
+  | "youtube_channel_transferred";
 
 export type EmailTemplateMeta = {
   id: EmailTemplateId;
@@ -56,6 +58,22 @@ export const EMAIL_TEMPLATES: EmailTemplateMeta[] = [
       "Sent when someone signs in from a new device or a different IP. Not sent on the first login.",
     subject: "Security alert: new sign-in to OrzuAi",
     previewBody: "Device, IP, location, and time of the unexpected sign-in.",
+  },
+  {
+    id: "youtube_channel_connected",
+    name: "YouTube channel connected",
+    when:
+      "Sent to the Google / OrzuAi owner when a YouTube channel is linked to OrzuAi.",
+    subject: "Your YouTube channel was connected to OrzuAi",
+    previewBody: "Security notice that a channel was linked to the platform.",
+  },
+  {
+    id: "youtube_channel_transferred",
+    name: "YouTube channel transferred",
+    when:
+      "Sent to the previous OrzuAi account after a channel is transferred away.",
+    subject: "Your YouTube channel was moved on OrzuAi",
+    previewBody: "Channel left this OrzuAi account after a transfer.",
   },
 ];
 
@@ -254,6 +272,57 @@ export function buildNewDeviceEmail(opts: {
   };
 }
 
+export function buildYoutubeChannelConnectedEmail(opts: {
+  channelTitle: string;
+  channelId: string;
+  connectedByEmail?: string | null;
+  appUrl: string;
+}) {
+  const by = opts.connectedByEmail
+    ? `<p style="margin:12px 0 0;color:#cfcabe;">OrzuAi account involved: <strong style="color:#f2efe8;">${escapeHtml(opts.connectedByEmail)}</strong></p>`
+    : "";
+  return {
+    subject: "Your YouTube channel was connected to OrzuAi",
+    html: renderEmailShell({
+      title: "YouTube channel linked to OrzuAi",
+      preheader: `${opts.channelTitle} was connected to OrzuAi`,
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">A YouTube channel associated with this email was connected to the OrzuAi platform.</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;font-size:14px;color:#cfcabe;">
+          <tr><td style="padding:6px 0;width:130px;color:#9a958c;">Channel</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.channelTitle)}</td></tr>
+          <tr><td style="padding:6px 0;color:#9a958c;">Channel ID</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.channelId)}</td></tr>
+        </table>
+        ${by}
+        <p style="margin:16px 0 0;color:#cfcabe;">If this was you, no action is needed. If it was not you, revoke OrzuAi access in your Google Account security settings and contact Support.</p>`,
+      ctaLabel: "Open OrzuAi",
+      ctaUrl: `${opts.appUrl.replace(/\/$/, "")}/dashboard`,
+      securityNote: `Report unexpected channel access to ${SUPPORT_EMAIL}.`,
+    }),
+  };
+}
+
+export function buildYoutubeChannelTransferredEmail(opts: {
+  channelTitle: string;
+  channelId: string;
+  appUrl: string;
+}) {
+  return {
+    subject: "Your YouTube channel was moved on OrzuAi",
+    html: renderEmailShell({
+      title: "Channel transferred to another OrzuAi account",
+      preheader: `${opts.channelTitle} left your OrzuAi account`,
+      bodyHtml: `<p style="margin:0 0 12px;color:#cfcabe;">A YouTube channel that was linked to your OrzuAi account has been transferred to another OrzuAi account. It is no longer connected here.</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;font-size:14px;color:#cfcabe;">
+          <tr><td style="padding:6px 0;width:130px;color:#9a958c;">Channel</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.channelTitle)}</td></tr>
+          <tr><td style="padding:6px 0;color:#9a958c;">Channel ID</td><td style="padding:6px 0;color:#f2efe8;">${escapeHtml(opts.channelId)}</td></tr>
+        </table>
+        <p style="margin:16px 0 0;color:#cfcabe;">If you did not approve this, contact Support and revoke OrzuAi in Google Account → Security → Third-party access.</p>`,
+      ctaLabel: "Open OrzuAi",
+      ctaUrl: `${opts.appUrl.replace(/\/$/, "")}/dashboard`,
+      securityNote: `Questions? Write to ${SUPPORT_EMAIL}.`,
+    }),
+  };
+}
+
 /** Preview HTML for admin Email section. */
 export function previewEmailHtml(id: EmailTemplateId, appUrl: string): string {
   switch (id) {
@@ -275,6 +344,19 @@ export function previewEmailHtml(id: EmailTemplateId, appUrl: string): string {
         ip: "203.0.113.42",
         location: "Berlin, Germany (approx.)",
         when: "22 Jul 2026, 21:15 UTC",
+        appUrl,
+      }).html;
+    case "youtube_channel_connected":
+      return buildYoutubeChannelConnectedEmail({
+        channelTitle: "My Channel",
+        channelId: "UCxxxxxxxx",
+        connectedByEmail: "user@example.com",
+        appUrl,
+      }).html;
+    case "youtube_channel_transferred":
+      return buildYoutubeChannelTransferredEmail({
+        channelTitle: "My Channel",
+        channelId: "UCxxxxxxxx",
         appUrl,
       }).html;
     default:

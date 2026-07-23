@@ -24,7 +24,7 @@ export function PwaRegister() {
   return (
     <button
       type="button"
-      className="fixed bottom-4 right-4 z-[80] rounded-full border border-[color:rgba(232,165,75,0.45)] bg-[#121212]/95 px-4 py-2.5 text-sm font-semibold text-[color:var(--accent)] shadow-lg backdrop-blur"
+      className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-[80] rounded-full border border-[color:rgba(232,165,75,0.45)] bg-[#121212]/95 px-4 py-2.5 text-sm font-semibold text-[color:var(--accent)] shadow-lg backdrop-blur lg:bottom-4 lg:right-4"
       onClick={async () => {
         const ev = deferred as Event & {
           prompt: () => Promise<void>;
