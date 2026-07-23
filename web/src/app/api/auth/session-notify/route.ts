@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import {
   recordLoginDevice,
@@ -8,8 +9,9 @@ import {
 export const runtime = "nodejs";
 
 /**
- * After OAuth / session restore: remember device, welcome once,
+ * After OAuth / password login: remember device, welcome once,
  * alert only on later new device / IP mismatch.
+ * Does not clear signup OTP pending state.
  */
 export async function POST(request: Request) {
   const supabase = await createClient();
@@ -18,6 +20,17 @@ export async function POST(request: Request) {
   } = await supabase.auth.getUser();
   if (!user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const jar = await cookies();
+  const otpOk = jar.get("orzu_otp_ok")?.value;
+  const otpUid = jar.get("orzu_otp_uid")?.value;
+  const otpPurpose = jar.get("orzu_otp_purpose")?.value;
+  if (otpOk === "0" && otpUid === user.id && otpPurpose === "signup") {
+    return NextResponse.json(
+      { error: "Email verification required", needsOtp: true },
+      { status: 403 },
+    );
   }
 
   let body: { action?: string } = {};
@@ -45,20 +58,26 @@ export async function POST(request: Request) {
       null,
   });
 
+  const secure = process.env.NODE_ENV === "production";
   const res = NextResponse.json({ ok: true });
   res.cookies.set("orzu_otp_ok", "1", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
   res.cookies.set("orzu_otp_uid", user.id, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
+  });
+  res.cookies.set("orzu_otp_purpose", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
   });
   return res;
 }

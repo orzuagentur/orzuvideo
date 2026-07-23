@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { VideoJob } from "@/lib/types";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
@@ -145,6 +153,10 @@ function PromptChip({
 }
 
 export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const tab = rawTab === "library" ? "library" : "create";
   const [jobs, setJobs] = useState(() => initialJobs.filter(isCreativityJob));
   const [prompt, setPrompt] = useState("");
   const [aspect, setAspect] = useState<Aspect>("9:16");
@@ -153,7 +165,6 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   const [creating, setCreating] = useState(false);
   const { show: toast, notice } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"create" | "library">("create");
 
   const activeJobs = useMemo(
     () => jobs.filter((j) => QUEUE_STATUSES.has(j.status)),
@@ -232,7 +243,9 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     }
     setPrompt("");
     toast("Generation started", "info");
-    setTab("library");
+    const next = new URLSearchParams(searchParams.toString());
+    next.set("tab", "library");
+    router.replace(`/dashboard/content?${next.toString()}`, { scroll: false });
     await refreshJobs();
   }
 
@@ -253,40 +266,13 @@ export function CreativityStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   return (
     <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-8 pb-28">
       {notice}
-      <header className="rise space-y-4">
+      <header className="rise">
         <h1
           className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
           style={{ fontWeight: 800 }}
         >
           Creativity
         </h1>
-        <nav
-          className="flex gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
-          aria-label="Creativity sections"
-        >
-          {(
-            [
-              { id: "create" as const, label: "Create" },
-              { id: "library" as const, label: "My creations" },
-            ] as const
-          ).map((item) => {
-            const on = tab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className="flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition"
-                style={{
-                  background: on ? "rgba(232,165,75,0.16)" : "transparent",
-                  color: on ? "var(--accent)" : "var(--muted)",
-                }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
       </header>
 
       {tab === "create" && (

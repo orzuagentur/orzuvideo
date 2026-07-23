@@ -11,6 +11,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { ChannelsMenu } from "@/components/ChannelsMenu";
 import { ClippingProgressDock } from "@/components/ClippingProgressDock";
 import {
@@ -31,6 +32,137 @@ const NAV: NavItem[] = [
   { href: "/dashboard/content", label: "Creativity" },
   { href: "/dashboard/favorites", label: "Library" },
 ];
+
+const LIBRARY_TABS = [
+  { id: "clips", label: "My clips" },
+  { id: "videos", label: "My videos" },
+  { id: "favorites", label: "Favorites" },
+] as const;
+
+const CLIPPING_TABS = [
+  { id: "create", label: "Create" },
+  { id: "clips", label: "My clips" },
+] as const;
+
+const CREATIVITY_TABS = [
+  { id: "create", label: "Create" },
+  { id: "library", label: "My creations" },
+] as const;
+
+function LibraryHeaderTabs() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const raw = searchParams.get("tab");
+  const tab =
+    raw === "videos" || raw === "favorites" || raw === "clips" ? raw : "clips";
+
+  return (
+    <nav
+      className="mx-auto flex w-full max-w-3xl gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
+      aria-label="Library sections"
+    >
+      {LIBRARY_TABS.map((item) => {
+        const on = tab === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams.toString());
+              next.set("tab", item.id);
+              router.replace(`/dashboard/favorites?${next.toString()}`, {
+                scroll: false,
+              });
+            }}
+            className="min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition"
+            style={{
+              background: on ? "rgba(232,165,75,0.16)" : "transparent",
+              color: on ? "var(--accent)" : "var(--muted)",
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function ClippingHeaderTabs() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const raw = searchParams.get("tab");
+  const tab = raw === "clips" || raw === "create" ? raw : "create";
+
+  return (
+    <nav
+      className="mx-auto flex w-full max-w-2xl gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
+      aria-label="AI Clipping sections"
+    >
+      {CLIPPING_TABS.map((item) => {
+        const on = tab === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams.toString());
+              next.set("tab", item.id);
+              router.replace(`/dashboard/clipping?${next.toString()}`, {
+                scroll: false,
+              });
+            }}
+            className="min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition"
+            style={{
+              background: on ? "rgba(232,165,75,0.16)" : "transparent",
+              color: on ? "var(--accent)" : "var(--muted)",
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function CreativityHeaderTabs() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const raw = searchParams.get("tab");
+  const tab = raw === "library" || raw === "create" ? raw : "create";
+
+  return (
+    <nav
+      className="mx-auto flex w-full max-w-2xl gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
+      aria-label="Creativity sections"
+    >
+      {CREATIVITY_TABS.map((item) => {
+        const on = tab === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams.toString());
+              next.set("tab", item.id);
+              router.replace(`/dashboard/content?${next.toString()}`, {
+                scroll: false,
+              });
+            }}
+            className="min-w-0 flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition"
+            style={{
+              background: on ? "rgba(232,165,75,0.16)" : "transparent",
+              color: on ? "var(--accent)" : "var(--muted)",
+            }}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 type ChannelsCtx = {
   menuOpen: boolean;
@@ -96,7 +228,8 @@ export function YouTubeChannelsButton({
 }) {
   const pathname = usePathname();
   const { menuOpen, setMenuOpen } = useChannelsMenu();
-  const onChannel = pathname.startsWith("/dashboard/channel");
+  const onChannel =
+    pathname === "/dashboard" || pathname.startsWith("/dashboard/channel");
 
   return (
     <div className={`relative shrink-0 ${className}`}>
@@ -115,7 +248,7 @@ export function YouTubeChannelsButton({
         }}
       >
         <YouTubeIcon />
-        <span className="whitespace-nowrap">YouTube channel</span>
+        <span className="whitespace-nowrap">YouTube Channels</span>
         <TinyChevron open={menuOpen} />
       </button>
       <ChannelsMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
@@ -226,6 +359,10 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const isCreators = pathname.startsWith("/dashboard/creators");
+  const isLibrary = pathname.startsWith("/dashboard/favorites");
+  const isClipping = pathname.startsWith("/dashboard/clipping");
+  const isCreativity = pathname.startsWith("/dashboard/content");
   const isEditor = pathname.startsWith("/dashboard/editor");
   const ctx = { menuOpen, setMenuOpen };
 
@@ -249,13 +386,7 @@ export function AppShell({
           <header className="sticky top-0 z-50 bg-[color:var(--bg)]/95 backdrop-blur-md">
             {/* Tall band so section links sit midway between top of screen and search */}
             <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
-              <Link
-                href="/dashboard"
-                className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.9rem] tracking-[0.03em] md:text-[2.15rem] md:tracking-[0.04em]"
-                style={{ fontWeight: 800, transform: "scaleY(1.12)" }}
-              >
-                OrzuAi
-              </Link>
+              <BrandLogo href="/dashboard" size={40} />
 
               {/* Slightly below vertical center, toward the search row */}
               <nav className="pointer-events-none absolute inset-0 flex items-center justify-center pt-3 md:pt-4">
@@ -289,7 +420,44 @@ export function AppShell({
               </div>
             </div>
 
-            {/* YouTube connect lives on Home */}
+            {/* Library / AI Clipping / Creativity: section tabs in sticky header */}
+            {!isCreators && (
+              <div
+                className={`flex items-center px-4 pb-3 md:px-6 ${
+                  isClipping || isCreativity || isLibrary
+                    ? "w-full justify-center"
+                    : "gap-3"
+                }`}
+              >
+                {isLibrary ? (
+                  <Suspense
+                    fallback={
+                      <div className="h-10 w-full max-w-3xl rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]" />
+                    }
+                  >
+                    <LibraryHeaderTabs />
+                  </Suspense>
+                ) : isClipping ? (
+                  <Suspense
+                    fallback={
+                      <div className="h-10 w-full max-w-2xl rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]" />
+                    }
+                  >
+                    <ClippingHeaderTabs />
+                  </Suspense>
+                ) : isCreativity ? (
+                  <Suspense
+                    fallback={
+                      <div className="h-10 w-full max-w-2xl rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)]" />
+                    }
+                  >
+                    <CreativityHeaderTabs />
+                  </Suspense>
+                ) : (
+                  <YouTubeChannelsButton />
+                )}
+              </div>
+            )}
           </header>
 
           <main className="min-w-0 flex-1 px-4 py-4 md:px-6 md:py-5">

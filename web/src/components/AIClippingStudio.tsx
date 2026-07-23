@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   useCallback,
@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type CSSProperties,
 } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { VideoJob } from "@/lib/types";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
@@ -20,6 +22,7 @@ import {
 import { useToast } from "@/components/ToastNotice";
 import { clippingSourcePath, MEDIA_BUCKET } from "@/lib/storage";
 import { VoicePicker } from "@/components/VoicePicker";
+import { SUBTITLE_STYLES } from "@/lib/editor-catalog";
 
 const ASPECTS = [
   { id: "9:16", label: "9:16", hint: "Shorts / Reels" },
@@ -35,10 +38,42 @@ const DURATIONS = [
 ] as const;
 
 const MAX_SOURCES = 6;
-const MAX_BYTES = 500 * 1024 * 1024; // 500 MB â€” matches storage bucket for clipping sources
+const MAX_BYTES = 500 * 1024 * 1024; // 500 MB — matches storage bucket for clipping sources
 const MAX_MB = Math.round(MAX_BYTES / (1024 * 1024));
 
 type Aspect = (typeof ASPECTS)[number]["id"];
+type SubtitleStyleId = (typeof SUBTITLE_STYLES)[number]["id"];
+
+/** Full sentence for live karaoke-style preview on each subtitle card */
+const PREVIEW_SENTENCE =
+  "This is how your subtitles look on the clip";
+const PREVIEW_WORDS = PREVIEW_SENTENCE.split(/\s+/);
+/** Match burned ASS: ~3 words on screen, then advance to the next group */
+const PREVIEW_CHUNK = 3;
+
+/** One square stock photo per style (Unsplash — free to display) */
+const SUBTITLE_PREVIEW_BG: Record<SubtitleStyleId, string> = {
+  classic:
+    "https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=480&h=480&q=80",
+  karaoke_gold:
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=480&h=480&q=80",
+  box_white:
+    "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=480&h=480&q=80",
+  neon_pink:
+    "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?auto=format&fit=crop&w=480&h=480&q=80",
+  minimal:
+    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=480&h=480&q=80",
+  impact:
+    "https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?auto=format&fit=crop&w=480&h=480&q=80",
+  soft_shadow:
+    "https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=480&h=480&q=80",
+  yellow_pop:
+    "https://images.unsplash.com/photo-1516035069371-29a1b244cc32?auto=format&fit=crop&w=480&h=480&q=80",
+  lower_third:
+    "https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=480&h=480&q=80",
+  hook_banner:
+    "https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?auto=format&fit=crop&w=480&h=480&q=80",
+};
 
 type ClipSource = {
   id: string;
@@ -51,18 +86,6 @@ type ClipSource = {
   downloadUrl?: string | null;
   storagePath?: string | null;
   storageBucket?: string | null;
-};
-
-type LibraryItem = {
-  id: string;
-  title: string;
-  author: string;
-  kind: string;
-  provider: string;
-  media_url: string | null;
-  thumb_url: string | null;
-  download_url: string | null;
-  duration_seconds: number | null;
 };
 
 function isClippingJob(job: VideoJob) {
@@ -151,7 +174,7 @@ function Toggle({
         }}
         aria-hidden
       >
-        {on ? "âœ“" : ""}
+        {on ? "✓" : ""}
       </span>
       <span className="min-w-0">
         <span className="block text-sm font-semibold">{label}</span>
@@ -161,305 +184,232 @@ function Toggle({
   );
 }
 
-function AddSourceMenu({
-  onDevice,
-  onMedia,
-}: {
-  onDevice: () => void;
-  onMedia: () => void;
-}) {
-  return (
-    <div
-      className="overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl"
-      role="menu"
-    >
-      <button
-        type="button"
-        role="menuitem"
-        className="flex w-full flex-col items-start gap-0.5 px-4 py-3 text-left transition hover:bg-white/5"
-        onClick={onDevice}
-      >
-        <span className="text-sm font-semibold">From device</span>
-        <span className="text-xs text-[color:var(--muted)]">
-          Upload MP4 / MOV (max {MAX_MB} MB)
-        </span>
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="flex w-full flex-col items-start gap-0.5 border-t border-[color:var(--line)] px-4 py-3 text-left transition hover:bg-white/5"
-        onClick={onMedia}
-      >
-        <span className="text-sm font-semibold">Media library</span>
-        <span className="text-xs text-[color:var(--muted)]">
-          Stock videos from your studio library
-        </span>
-      </button>
-    </div>
-  );
+function liveSubtitleStyle(style: SubtitleStyleId): CSSProperties {
+  const base: CSSProperties = {
+    fontWeight: 800,
+    fontSize: "0.68rem",
+    lineHeight: 1.35,
+    textAlign: "center",
+    maxWidth: "100%",
+  };
+  switch (style) {
+    case "karaoke_gold":
+      return {
+        ...base,
+        color: "#FFD700",
+        textShadow: "0 0 10px rgba(255,215,0,0.55), 0 2px 4px #000",
+      };
+    case "box_white":
+      return {
+        ...base,
+        color: "#fff",
+        background: "rgba(0,0,0,0.62)",
+        borderRadius: 6,
+        padding: "4px 8px",
+        display: "inline-block",
+      };
+    case "neon_pink":
+      return {
+        ...base,
+        color: "#FF66FF",
+        textShadow: "0 0 10px #FF00AA, 0 2px 4px #000",
+      };
+    case "minimal":
+      return {
+        ...base,
+        color: "#f0f0f0",
+        fontWeight: 500,
+        textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+      };
+    case "impact":
+      return {
+        ...base,
+        fontSize: "0.72rem",
+        color: "#fff",
+        textShadow: "2px 2px 0 #000, -1px -1px 0 #000",
+      };
+    case "soft_shadow":
+      return {
+        ...base,
+        color: "#fff",
+        textShadow: "0 3px 8px rgba(0,0,0,0.9)",
+      };
+    case "yellow_pop":
+      return {
+        ...base,
+        color: "#FFFF00",
+        textShadow: "0 2px 4px #000",
+      };
+    case "lower_third":
+      return {
+        ...base,
+        color: "#fff",
+        fontSize: "0.62rem",
+        background: "rgba(0,0,0,0.75)",
+        borderLeft: "3px solid var(--accent)",
+        padding: "4px 8px",
+        display: "inline-block",
+        textAlign: "left",
+      };
+    case "hook_banner":
+      return {
+        ...base,
+        color: "var(--accent)",
+        fontSize: "0.72rem",
+        textShadow: "0 2px 6px #000",
+      };
+    default:
+      return {
+        ...base,
+        color: "#fff",
+        textShadow: "0 2px 4px #000, 0 0 1px #000",
+      };
+  }
 }
 
-function LibraryModal({
-  open,
-  alreadyIds,
-  onClose,
-  onConfirm,
+function SubtitleStyleCard({
+  style,
+  active,
+  disabled,
+  onSelect,
 }: {
-  open: boolean;
-  alreadyIds: Set<string>;
-  onClose: () => void;
-  onConfirm: (items: LibraryItem[]) => void;
+  style: (typeof SUBTITLE_STYLES)[number];
+  active: boolean;
+  disabled?: boolean;
+  onSelect: () => void;
 }) {
-  const [q, setQ] = useState("cinematic");
-  const [orientation, setOrientation] = useState("all");
-  const [items, setItems] = useState<LibraryItem[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const cursorRef = useRef(0);
 
   useEffect(() => {
-    if (!open) return;
-    setSelected(new Set());
-    setQ("cinematic");
-    setOrientation("all");
-    setPage(1);
-  }, [open]);
+    let cancelled = false;
+    const timers: number[] = [];
+    const later = (fn: () => void, ms: number) => {
+      timers.push(window.setTimeout(fn, ms));
+    };
 
-  useEffect(() => {
-    if (!open) return;
-    const t = window.setTimeout(() => {
-      void (async () => {
-        setLoading(true);
-        const params = new URLSearchParams({
-          q: q.trim() || "cinematic",
-          page: String(page),
-          orientation,
-        });
-        const res = await fetch(`/api/clipping/library?${params}`);
-        const data = await res.json().catch(() => ({}));
-        setLoading(false);
-        if (res.ok) {
-          setItems((data.items || []) as LibraryItem[]);
-          setHasMore(Boolean(data.hasMore));
-        } else {
-          setItems([]);
-          setHasMore(false);
-        }
-      })();
-    }, 200);
-    return () => window.clearTimeout(t);
-  }, [open, q, orientation, page]);
+    const advance = () => {
+      if (cancelled) return;
+      const c = cursorRef.current;
+      const next = (c + 1) % PREVIEW_WORDS.length;
+      const curChunk = Math.floor(c / PREVIEW_CHUNK);
+      const nextChunk = Math.floor(next / PREVIEW_CHUNK);
+      const wraps = nextChunk !== curChunk || next === 0;
 
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+      if (wraps) {
+        setLeaving(true);
+        later(() => {
+          if (cancelled) return;
+          cursorRef.current = next;
+          setCursor(next);
+          setLeaving(false);
+          later(advance, 500);
+        }, 170);
+        return;
+      }
 
-  if (!open) return null;
+      cursorRef.current = next;
+      setCursor(next);
+      later(advance, 500);
+    };
 
-  const picked = items.filter((i) => selected.has(i.id));
+    later(advance, 500);
+    return () => {
+      cancelled = true;
+      timers.forEach((id) => window.clearTimeout(id));
+    };
+  }, []);
+
+  const css = liveSubtitleStyle(style.id);
+  const bg = SUBTITLE_PREVIEW_BG[style.id];
+  const chunkStart = Math.floor(cursor / PREVIEW_CHUNK) * PREVIEW_CHUNK;
+  const chunk = PREVIEW_WORDS.slice(chunkStart, chunkStart + PREVIEW_CHUNK);
+  const activeInChunk = cursor - chunkStart;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal
-      aria-label="Media library"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      className="flex flex-col overflow-hidden rounded-xl border text-left transition"
+      style={{
+        borderColor: active ? "rgba(232,165,75,0.55)" : "var(--line)",
+        background: active ? "rgba(232,165,75,0.1)" : "rgba(0,0,0,0.25)",
+        boxShadow: active ? "0 0 0 1px rgba(232,165,75,0.25)" : undefined,
       }}
     >
-      <div className="flex max-h-[min(90vh,720px)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-[color:var(--line)] px-5 py-4">
-          <div>
-            <h2 className="text-lg font-semibold">Media library</h2>
-            <p className="text-xs text-[color:var(--muted)]">
-              Stock videos from your studio library
-            </p>
-          </div>
-          <button type="button" className="btn btn-ghost text-sm" onClick={onClose}>
-            Close
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] px-5 py-3">
-          <input
-            className="field min-w-[12rem] flex-1 text-sm"
-            placeholder="Search Media videosâ€¦"
-            value={q}
-            onChange={(e) => {
-              setPage(1);
-              setQ(e.target.value);
+      <div className="relative aspect-square w-full overflow-hidden bg-black/40">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={bg}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+          loading="lazy"
+          referrerPolicy="no-referrer"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 flex min-h-[42%] items-end justify-center px-2.5 pb-3 pt-6">
+          <span
+            style={{
+              ...css,
+              display: "inline-block",
+              opacity: leaving ? 0 : 1,
+              transform: leaving ? "translateY(8px)" : "translateY(0)",
+              transition: "opacity 0.16s ease, transform 0.16s ease",
             }}
-            autoFocus
-          />
-          {(
-            [
-              ["all", "All"],
-              ["portrait", "Portrait"],
-              ["landscape", "Landscape"],
-              ["square", "Square"],
-            ] as const
-          ).map(([id, label]) => {
-            const on = orientation === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => {
-                  setPage(1);
-                  setOrientation(id);
-                }}
-                className="rounded-full border px-3 py-1.5 text-xs font-semibold"
-                style={{
-                  borderColor: on ? "rgba(232,165,75,0.55)" : "var(--line)",
-                  background: on ? "rgba(232,165,75,0.14)" : "transparent",
-                  color: on ? "var(--accent)" : "var(--fg)",
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <p className="py-10 text-center text-sm text-[color:var(--muted)]">
-              Loading Mediaâ€¦
-            </p>
-          ) : items.length === 0 ? (
-            <p className="py-10 text-center text-sm text-[color:var(--muted)]">
-              No videos found
-            </p>
-          ) : (
-            <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {items.map((item) => {
-                const on = selected.has(item.id);
-                const locked = alreadyIds.has(item.id) && !on;
-                return (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      disabled={locked}
-                      onClick={() =>
-                        setSelected((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(item.id)) next.delete(item.id);
-                          else next.add(item.id);
-                          return next;
-                        })
-                      }
-                      className="w-full overflow-hidden rounded-xl border text-left transition"
-                      style={{
-                        borderColor: on ? "rgba(232,165,75,0.6)" : "var(--line)",
-                        opacity: locked ? 0.45 : 1,
-                        boxShadow: on
-                          ? "0 0 0 1px rgba(232,165,75,0.35)"
-                          : undefined,
-                      }}
-                    >
-                      <div className="relative aspect-video bg-black/40">
-                        {item.thumb_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={item.thumb_url}
-                            alt=""
-                            className="h-full w-full object-cover"
-                          />
-                        ) : item.media_url ? (
-                          <video
-                            src={item.media_url}
-                            className="h-full w-full object-cover"
-                            muted
-                            playsInline
-                            preload="metadata"
-                          />
-                        ) : null}
-                        <span
-                          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold"
-                          style={{
-                            background: on ? "var(--accent)" : "rgba(0,0,0,0.55)",
-                            color: on ? "#1a1208" : "#fff",
-                          }}
-                        >
-                          {on ? "âœ“" : ""}
-                        </span>
-                      </div>
-                      <div className="space-y-0.5 px-2.5 py-2">
-                        <p className="line-clamp-2 text-xs font-semibold leading-snug">
-                          {item.title}
-                        </p>
-                        <p className="text-[10px] text-[color:var(--muted)]">
-                          {item.author || "Stock"}
-                          {item.duration_seconds
-                            ? ` Â· ${item.duration_seconds}s`
-                            : ""}
-                        </p>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[color:var(--line)] px-5 py-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn-ghost text-xs"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              Prev
-            </button>
-            <span className="text-xs text-[color:var(--muted)]">Page {page}</span>
-            <button
-              type="button"
-              className="btn btn-ghost text-xs"
-              disabled={!hasMore || loading}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </button>
-          </div>
-          <div className="flex items-center gap-3">
-            <p className="text-sm text-[color:var(--muted)]">{picked.length} selected</p>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={picked.length === 0}
-              onClick={() => onConfirm(picked)}
-            >
-              Done
-            </button>
-          </div>
+          >
+            {chunk.map((w, i) => {
+              const isLive = i === activeInChunk && !leaving;
+              const isPast = i < activeInChunk;
+              return (
+                <span
+                  key={`${chunkStart}-${w}-${i}`}
+                  style={{
+                    opacity: isLive ? 1 : isPast ? 0.9 : 0.38,
+                    transform: isLive
+                      ? "translateY(-1px) scale(1.1)"
+                      : "translateY(0) scale(1)",
+                    display: "inline-block",
+                    marginRight: i < chunk.length - 1 ? "0.3em" : 0,
+                    transition:
+                      "opacity 0.28s ease, transform 0.28s ease, filter 0.28s ease",
+                    filter: isLive ? "brightness(1.2)" : "none",
+                  }}
+                >
+                  {w}
+                </span>
+              );
+            })}
+          </span>
         </div>
       </div>
-    </div>
+      <span className="truncate px-2 py-1.5 text-[11px] font-semibold">
+        {style.label}
+      </span>
+    </button>
   );
 }
 
 export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabRaw = searchParams.get("tab");
+  const tab: "create" | "clips" =
+    tabRaw === "clips" || tabRaw === "create" ? tabRaw : "create";
   const fileRef = useRef<HTMLInputElement>(null);
-  const addMenuRef = useRef<HTMLDivElement>(null);
   const [jobs, setJobs] = useState(() => initialJobs.filter(isClippingJob));
   const [sources, setSources] = useState<ClipSource[]>([]);
-  const [addMenu, setAddMenu] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [aspect, setAspect] = useState<Aspect>("9:16");
   const [duration, setDuration] = useState(30);
   const [useVoice, setUseVoice] = useState(true);
   const [voiceId, setVoiceId] = useState("");
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [addMusic, setAddMusic] = useState(true);
+  const [addSubtitles, setAddSubtitles] = useState(true);
+  const [subtitleStyle, setSubtitleStyle] =
+    useState<SubtitleStyleId>("classic");
+  const [subsOpen, setSubsOpen] = useState(true);
   const [musicTrackId, setMusicTrackId] = useState("");
   const [musicOpen, setMusicOpen] = useState(false);
   const [musicTracks, setMusicTracks] = useState<
@@ -476,7 +426,6 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
   const [instructions, setInstructions] = useState("");
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [tab, setTab] = useState<"create" | "clips">("create");
   const [watchSource, setWatchSource] = useState<ClipSource | null>(null);
   const { show: toast, notice } = useToast();
 
@@ -511,14 +460,8 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     let cancelled = false;
     setMusicLoading(true);
     void (async () => {
-      const params = new URLSearchParams({
-        type: "music",
-        q: "soundtrack",
-        page: "1",
-      });
-      const res = await fetch(`/api/media/search?${params}`, {
-        cache: "no-store",
-      });
+      // Main shared platform music library (same catalog as AI Training)
+      const res = await fetch("/api/music/group", { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (cancelled) return;
       setMusicLoading(false);
@@ -527,16 +470,16 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
         return;
       }
       const tracks = (
-        (data.items || []) as Array<{
+        (data.tracks || []) as Array<{
           id: string;
-          title?: string;
-          author?: string;
+          name?: string;
+          artist?: string | null;
           previewUrl?: string | null;
         }>
       ).map((t) => ({
         id: String(t.id),
-        name: t.title || `Track #${t.id}`,
-        artist: t.author || "Library",
+        name: t.name || "Track",
+        artist: t.artist || "Library",
         previewUrl: t.previewUrl || null,
       }));
       setMusicTracks(tracks);
@@ -574,15 +517,6 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     const t = window.setInterval(() => void refreshJobs(), 2500);
     return () => window.clearInterval(t);
   }, [activeJobs.length, refreshJobs]);
-
-  useEffect(() => {
-    if (!addMenu) return;
-    function onDoc(e: MouseEvent) {
-      if (!addMenuRef.current?.contains(e.target as Node)) setAddMenu(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [addMenu]);
 
   useEffect(() => {
     return () => {
@@ -647,41 +581,12 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     });
   }
 
-  function addLibraryItems(items: LibraryItem[]) {
-    const room = MAX_SOURCES - sources.length;
-    const existing = new Set(
-      sources.filter((s) => s.mediaId).map((s) => s.mediaId!),
-    );
-    const next: ClipSource[] = [];
-    for (const item of items) {
-      if (existing.has(item.id)) continue;
-      if (next.length >= room) break;
-      if (!item.download_url) continue;
-      next.push({
-        id: uid(),
-        kind: "media",
-        title: item.title,
-        previewUrl: item.thumb_url || item.media_url,
-        mediaId: item.id,
-        provider: "library",
-        downloadUrl: item.download_url || item.media_url,
-      });
-    }
-    if (next.length === 0) {
-      toast("Those videos are already added or unavailable", "info");
-    } else {
-      setSources((prev) => [...prev, ...next]);
-    }
-    setLibraryOpen(false);
-  }
-
   async function startClip() {
     if (sources.length === 0) {
       toast("Add at least one video first.", "error");
       return;
     }
     setCreating(true);
-    setAddMenu(false);
 
     try {
       const supabase = createClient();
@@ -751,6 +656,8 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
           add_music: addMusic,
           music_group: null,
           music_track_id: addMusic ? musicTrackId || null : null,
+          add_subtitles: addSubtitles,
+          subtitle_style: addSubtitles ? subtitleStyle : null,
           instructions: instructions.trim() || null,
         }),
       });
@@ -764,8 +671,8 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
       });
       setSources([]);
       setInstructions("");
-      setTab("clips");
-      toast("Clip queued â€” see My clips.", "info");
+      router.replace("/dashboard/clipping?tab=clips", { scroll: false });
+      toast("Clip queued — see My clips.", "info");
       await refreshJobs();
     } catch (err) {
       toast(err instanceof Error ? err.message : "Failed to start", "error");
@@ -788,58 +695,17 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
     toast("Clip deleted.");
   }
 
-  const alreadyLibraryIds = useMemo(() => {
-    const s = new Set<string>();
-    sources.forEach((x) => {
-      if (x.mediaId) s.add(x.mediaId);
-    });
-    return s;
-  }, [sources]);
-
   return (
     <div className="relative mx-auto flex w-full max-w-5xl flex-col gap-8 pb-24">
       {notice}
-      <LibraryModal
-        open={libraryOpen}
-        alreadyIds={alreadyLibraryIds}
-        onClose={() => setLibraryOpen(false)}
-        onConfirm={addLibraryItems}
-      />
 
-      <header className="rise space-y-4">
+      <header className="rise">
         <h1
           className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
           style={{ fontWeight: 800 }}
         >
           AI Clipping
         </h1>
-        <nav
-          className="flex gap-1 rounded-xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1"
-          aria-label="AI Clipping sections"
-        >
-          {(
-            [
-              { id: "create" as const, label: "Create" },
-              { id: "clips" as const, label: "My clips" },
-            ] as const
-          ).map((item) => {
-            const on = tab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setTab(item.id)}
-                className="flex-1 rounded-lg px-4 py-2.5 text-sm font-semibold transition"
-                style={{
-                  background: on ? "rgba(232,165,75,0.16)" : "transparent",
-                  color: on ? "var(--accent)" : "var(--muted)",
-                }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
       </header>
 
       {tab === "create" && (
@@ -859,6 +725,9 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
                   Format
+                </p>
+                <p className="mb-2 text-[11px] text-[color:var(--muted)]">
+                  Output is locked to the format you pick.
                 </p>
                 <div className="grid grid-cols-3 gap-2">
                   {ASPECTS.map((a) => {
@@ -897,6 +766,9 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
               <div>
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
                   Length
+                </p>
+                <p className="mb-2 text-[11px] text-[color:var(--muted)]">
+                  Clip is cut to this duration — not longer.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {DURATIONS.map((d) => {
@@ -939,6 +811,13 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                   label="Music"
                   detail="Background track"
                   onChange={setAddMusic}
+                />
+                <Toggle
+                  on={addSubtitles}
+                  disabled={creating}
+                  label="Subtitles"
+                  detail="Burn karaoke captions"
+                  onChange={setAddSubtitles}
                 />
               </div>
 
@@ -991,7 +870,7 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                         {musicTrackId
                           ? musicTracks.find((t) => t.id === musicTrackId)
                               ?.name || "Selected track"
-                          : "Auto — AI picks"}
+                          : "Auto"}
                       </span>
                     </span>
                     <span className="text-xs text-[color:var(--muted)]">
@@ -1003,6 +882,10 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       {musicLoading ? (
                         <p className="text-xs text-[color:var(--muted)]">
                           Loading tracks…
+                        </p>
+                      ) : musicTracks.length === 0 ? (
+                        <p className="text-xs text-[color:var(--muted)]">
+                          No tracks available yet.
                         </p>
                       ) : (
                         <div className="max-h-[280px] space-y-1.5 overflow-y-auto">
@@ -1100,6 +983,45 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                 </div>
               )}
 
+              {addSubtitles && (
+                <div className="rounded-xl border border-[color:var(--line)]">
+                  <button
+                    type="button"
+                    disabled={creating}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                    onClick={() => setSubsOpen((v) => !v)}
+                  >
+                    <span>
+                      <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
+                        Subtitle style
+                      </span>
+                      <span className="text-sm">
+                        {SUBTITLE_STYLES.find((s) => s.id === subtitleStyle)
+                          ?.label || "Classic"}
+                      </span>
+                    </span>
+                    <span className="text-xs text-[color:var(--muted)]">
+                      {subsOpen ? "Hide" : "Show"}
+                    </span>
+                  </button>
+                  {subsOpen && (
+                    <div className="border-t border-[color:var(--line)] p-3">
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {SUBTITLE_STYLES.map((s) => (
+                          <SubtitleStyleCard
+                            key={s.id}
+                            style={s}
+                            active={subtitleStyle === s.id}
+                            disabled={creating}
+                            onSelect={() => setSubtitleStyle(s.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--muted)]">
                   Instructions{" "}
@@ -1128,59 +1050,33 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
             </div>
 
             {/* Right — videos card (scrolls inside) */}
-            <div
-              className="flex flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] lg:sticky lg:top-4 lg:max-h-[min(720px,calc(100vh-7rem))]"
-              ref={addMenuRef}
-            >
+            <div className="flex flex-col overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] lg:sticky lg:top-4 lg:max-h-[min(720px,calc(100vh-7rem))]">
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[color:var(--line)] px-4 py-3">
-                <div>
-                  <p className="text-sm font-semibold">Videos</p>
-                  <p className="text-[11px] text-[color:var(--muted)]">
-                    {sources.length}/{MAX_SOURCES}
-                  </p>
-                </div>
+                <p className="text-sm font-semibold">Videos</p>
                 {sources.length > 0 && sources.length < MAX_SOURCES && (
-                  <div className="relative">
-                    <button
-                      type="button"
-                      disabled={creating}
-                      onClick={() => setAddMenu((v) => !v)}
-                      className="flex h-9 w-9 items-center justify-center rounded-full border text-lg font-light transition"
-                      style={{
-                        borderColor: addMenu
-                          ? "rgba(232,165,75,0.55)"
-                          : "var(--line)",
-                        color: "var(--accent)",
-                      }}
-                      aria-label="Add video"
-                    >
-                      +
-                    </button>
-                    {addMenu && (
-                      <div className="absolute right-0 top-[calc(100%+8px)] z-20 w-[220px]">
-                        <AddSourceMenu
-                          onDevice={() => {
-                            setAddMenu(false);
-                            fileRef.current?.click();
-                          }}
-                          onMedia={() => {
-                            setAddMenu(false);
-                            setLibraryOpen(true);
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    type="button"
+                    disabled={creating}
+                    onClick={() => fileRef.current?.click()}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border text-lg font-light transition"
+                    style={{
+                      borderColor: "var(--line)",
+                      color: "var(--accent)",
+                    }}
+                    aria-label="Add video from device"
+                  >
+                    +
+                  </button>
                 )}
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
                 {sources.length === 0 ? (
-                  <div className="relative flex min-h-[280px] flex-col items-center justify-center">
+                  <div className="flex min-h-[280px] flex-col items-center justify-center">
                     <button
                       type="button"
                       disabled={creating}
-                      onClick={() => setAddMenu((v) => !v)}
+                      onClick={() => fileRef.current?.click()}
                       className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-16 text-center transition hover:border-[color:rgba(232,165,75,0.45)]"
                       style={{ borderColor: "var(--line)" }}
                     >
@@ -1190,22 +1086,13 @@ export function AIClippingStudio({ initialJobs }: { initialJobs: VideoJob[] }) {
                       >
                         +
                       </span>
-                      <span className="text-sm font-semibold">Add video</span>
+                      <span className="text-sm font-semibold">
+                        Add video from device
+                      </span>
+                      <span className="text-xs text-[color:var(--muted)]">
+                        MP4 / MOV / WebM · max {MAX_MB} MB
+                      </span>
                     </button>
-                    {addMenu && (
-                      <div className="absolute left-1/2 top-1/2 z-20 w-[min(100%-1.5rem,260px)] -translate-x-1/2 -translate-y-1/2">
-                        <AddSourceMenu
-                          onDevice={() => {
-                            setAddMenu(false);
-                            fileRef.current?.click();
-                          }}
-                          onMedia={() => {
-                            setAddMenu(false);
-                            setLibraryOpen(true);
-                          }}
-                        />
-                      </div>
-                    )}
                   </div>
                 ) : (
                   <ul className="space-y-3">

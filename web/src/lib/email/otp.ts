@@ -59,28 +59,32 @@ export async function issueLoginOtp(opts: {
   };
 }
 
-export function otpPendingCookies(userId: string): NextResponse {
+export function otpPendingCookies(
+  userId: string,
+  purpose: OtpPurpose = "signup",
+): NextResponse {
   const res = NextResponse.json({
     ok: true,
     needsOtp: true,
   });
-  applyOtpPendingCookies(res, userId);
+  applyOtpPendingCookies(res, userId, purpose);
   return res;
 }
 
-export function applyOtpPendingCookies(res: NextResponse, userId: string) {
-  res.cookies.set("orzu_otp_ok", "0", {
+export function applyOtpPendingCookies(
+  res: NextResponse,
+  userId: string,
+  purpose: OtpPurpose = "signup",
+) {
+  const secure = process.env.NODE_ENV === "production";
+  const common = {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    secure,
     path: "/",
     maxAge: 60 * 15,
-  });
-  res.cookies.set("orzu_otp_uid", userId, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 15,
-  });
+  };
+  res.cookies.set("orzu_otp_ok", "0", common);
+  res.cookies.set("orzu_otp_uid", userId, common);
+  res.cookies.set("orzu_otp_purpose", purpose, common);
 }

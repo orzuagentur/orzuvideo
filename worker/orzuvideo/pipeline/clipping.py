@@ -198,6 +198,39 @@ def cut_segment(source: Path, start: float, duration: float, out: Path) -> Path:
     return out
 
 
+def force_duration(source: Path, out: Path, *, seconds: float) -> Path:
+    """Trim (or keep) video to an exact target length — never longer than requested."""
+    target = max(1.0, float(seconds))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    dur = ffprobe_duration(source)
+    if dur <= target + 0.12:
+        if out.resolve() != source.resolve():
+            out.write_bytes(source.read_bytes())
+        return out
+    run_ffmpeg(
+        [
+            "-i",
+            str(source),
+            "-t",
+            f"{target:.3f}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "18",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(out),
+        ]
+    )
+    return out
+
+
 def reframe_clip(
     source: Path,
     out: Path,
@@ -354,6 +387,7 @@ def burn_subs_keep_audio(
     *,
     work_dir: Path,
     size: tuple[int, int],
+    style_id: str = "classic",
 ) -> Path:
     if not words:
         if out.resolve() != video.resolve():
@@ -364,6 +398,7 @@ def burn_subs_keep_audio(
         words,
         work_dir / "clip_subs.ass",
         play_res=size,
+        style_id=style_id or "classic",
     )
     ass_esc = _escape_ass_path(ass)
     run_ffmpeg(

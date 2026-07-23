@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteChrome } from "@/components/SiteChrome";
+import { BrandLogoWide } from "@/components/BrandLogo";
 
 export const metadata: Metadata = {
   title: "About OrzuAi — AI YouTube Shorts Studio",
@@ -23,6 +24,7 @@ export const metadata: Metadata = {
     url: "https://www.orzuai.com/about",
     siteName: "OrzuAi",
     type: "website",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "OrzuAi" }],
   },
 };
 
@@ -31,12 +33,7 @@ export default function AboutPage() {
     <SiteChrome>
       <article className="mx-auto max-w-2xl space-y-8 pb-16 pt-10">
         <header className="space-y-3">
-          <p
-            className="font-[family-name:var(--font-syne)] text-4xl tracking-tight"
-            style={{ fontWeight: 800 }}
-          >
-            OrzuAi
-          </p>
+          <BrandLogoWide width={180} />
           <h1 className="text-2xl font-semibold">
             AI studio for YouTube Shorts and short-form video
           </h1>

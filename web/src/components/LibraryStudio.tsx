@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CardMenu, CardMenuSlot } from "@/components/CardMenu";
 import { useToast } from "@/components/ToastNotice";
 import { createClient } from "@/lib/supabase/client";
@@ -23,12 +24,6 @@ type FavoriteItem = {
   height: number | null;
   created_at: string;
 };
-
-const TABS: { id: LibTab; label: string }[] = [
-  { id: "clips", label: "My clips" },
-  { id: "videos", label: "My videos" },
-  { id: "favorites", label: "Favorites" },
-];
 
 const JOB_SELECT =
   "id,status,title,script_text,description,youtube_url,youtube_video_id,error_message,scheduled_for,created_at,completed_at,thumbnail_url,preview_url,view_count,like_count,comment_count,duration_seconds,storage_path,storage_bucket,metadata";
@@ -93,9 +88,15 @@ function FavHeart({
   );
 }
 
+function parseTab(raw: string | null): LibTab {
+  if (raw === "videos" || raw === "favorites" || raw === "clips") return raw;
+  return "clips";
+}
+
 export function LibraryStudio() {
+  const searchParams = useSearchParams();
+  const tab = parseTab(searchParams.get("tab"));
   const { show: toast, notice } = useToast();
-  const [tab, setTab] = useState<LibTab>("clips");
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [favs, setFavs] = useState<FavoriteItem[]>([]);
   const [favKeys, setFavKeys] = useState<Set<string>>(() => new Set());
@@ -139,9 +140,7 @@ export function LibraryStudio() {
     }
     const items = (data.items || []) as FavoriteItem[];
     setFavs(items);
-    setFavKeys(
-      new Set(items.map((x) => `${x.kind}:${x.asset_id}`)),
-    );
+    setFavKeys(new Set(items.map((x) => `${x.kind}:${x.asset_id}`)));
   }, [toast]);
 
   useEffect(() => {
@@ -248,38 +247,22 @@ export function LibraryStudio() {
   }
 
   const jobList = tab === "clips" ? clips : tab === "videos" ? videos : [];
+  const heading =
+    tab === "clips"
+      ? "My clips"
+      : tab === "videos"
+        ? "My videos"
+        : "Favorites";
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full flex-col gap-4 pb-16">
       {notice}
-      <header className="space-y-4">
-        <h1
-          className="font-[family-name:var(--font-syne)] text-3xl tracking-tight sm:text-4xl"
-          style={{ fontWeight: 800 }}
-        >
-          Library
-        </h1>
-        <nav className="flex flex-wrap gap-1.5">
-          {TABS.map((f) => {
-            const on = tab === f.id;
-            return (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setTab(f.id)}
-                className="rounded-full border px-3.5 py-1.5 text-sm font-semibold transition"
-                style={{
-                  borderColor: on ? "rgba(232,165,75,0.55)" : "var(--line)",
-                  background: on ? "rgba(232,165,75,0.14)" : "transparent",
-                  color: on ? "var(--accent)" : "var(--fg)",
-                }}
-              >
-                {f.label}
-              </button>
-            );
-          })}
-        </nav>
-      </header>
+      <h1
+        className="font-[family-name:var(--font-syne)] text-2xl tracking-tight sm:text-3xl"
+        style={{ fontWeight: 800 }}
+      >
+        {heading}
+      </h1>
 
       {loading ? (
         <p className="text-sm text-[color:var(--muted)]">Loading…</p>
@@ -289,16 +272,16 @@ export function LibraryStudio() {
             No favorites yet. Tap the heart on creators assets or your clips.
           </p>
         ) : (
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          <ul className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {favs.map((item) => {
               const dur = formatDuration(item.duration_sec);
               const playing = playingId === item.id;
               return (
                 <li
                   key={`${item.kind}:${item.asset_id}`}
-                  className="overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
+                  className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
                 >
-                  <div className="relative aspect-square bg-black/40">
+                  <div className="relative aspect-square w-full bg-black/40">
                     {item.thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -347,7 +330,7 @@ export function LibraryStudio() {
                       {dur ? ` · ${dur}` : ""}
                     </span>
                   </div>
-                  <div className="space-y-0.5 px-2.5 py-2">
+                  <div className="min-w-0 space-y-0.5 px-2.5 py-2">
                     <p className="truncate text-xs font-semibold">
                       {item.title || "Untitled"}
                     </p>
@@ -369,27 +352,24 @@ export function LibraryStudio() {
             : "No AI videos yet. Create one in Creativity."}
         </p>
       ) : (
-        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        <ul className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {jobList.map((job) => {
             const dur = formatDuration(job.duration_seconds);
             const key = `video:${job.id}`;
             const liked = favKeys.has(key);
             const href =
-              tab === "clips"
-                ? `/dashboard/clipping`
-                : `/dashboard/content`;
+              tab === "clips" ? `/dashboard/clipping` : `/dashboard/content`;
             return (
               <li
                 key={job.id}
-                className="overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
+                className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-[color:var(--line)] bg-black/25"
               >
-                <div className="relative aspect-[9/16] max-h-64 bg-black/40 sm:max-h-72">
+                <div className="relative aspect-[9/16] w-full bg-black/40">
                   {job.thumbnail_url || job.preview_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={
-                        job.thumbnail_url ||
-                        `/api/jobs/${job.id}/preview`
+                        job.thumbnail_url || `/api/jobs/${job.id}/preview`
                       }
                       alt=""
                       className="absolute inset-0 h-full w-full object-cover"
@@ -426,7 +406,7 @@ export function LibraryStudio() {
                     {dur ? ` · ${dur}` : ""}
                   </span>
                 </div>
-                <div className="space-y-0.5 px-2.5 py-2">
+                <div className="min-w-0 space-y-0.5 px-2.5 py-2">
                   <p className="truncate text-xs font-semibold">
                     {job.title || "Untitled"}
                   </p>

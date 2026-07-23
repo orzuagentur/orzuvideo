@@ -1,5 +1,6 @@
 "use client";
 
+import { YouTubeChannelsButton } from "@/components/AppShell";
 import {
   useCallback,
   useEffect,
@@ -324,11 +325,13 @@ export function CreatorsStudio() {
 
   return (
     <div className="space-y-4">
-      {/* Sticky toolbar — search */}
+      {/* Sticky toolbar — YouTube + search */}
       <form
         onSubmit={onSearch}
         className="sticky top-[5.75rem] z-40 -mx-4 flex flex-wrap items-center gap-2 bg-[color:var(--bg)]/95 px-4 py-3 backdrop-blur-md md:top-[6.25rem] md:-mx-6 md:px-6"
       >
+        <YouTubeChannelsButton />
+
         <div className="relative min-w-0 flex-1">
           <div className="absolute left-1.5 top-1/2 z-10 -translate-y-1/2" ref={typeRef}>
             <button

@@ -1,5 +1,5 @@
 /* OrzuAi Admin PWA — shell cache only */
-const CACHE = "orzuai-admin-shell-v1";
+const CACHE = "orzuai-admin-shell-v2";
 const PRECACHE = [
   "/",
   "/users",

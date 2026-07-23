@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { publicObjectUrl, r2Configured } from "@/lib/r2";
 import { MEDIA_BUCKET } from "@/lib/storage";
+import { SUBTITLE_STYLE_IDS } from "@/lib/editor-catalog";
 
 export const runtime = "nodejs";
 
@@ -70,6 +71,10 @@ export async function POST(request: Request) {
   const voiceId = String(body.voice_id || "").trim() || null;
   const musicTrackId = String(body.music_track_id || "").trim() || null;
   const musicGroup = String(body.music_group || "").trim() || null;
+  const subtitleStyleRaw = String(body.subtitle_style || "classic").trim();
+  const subtitle_style = SUBTITLE_STYLE_IDS.has(subtitleStyleRaw)
+    ? subtitleStyleRaw
+    : "classic";
   // Effects + transitions are always on (AI)
   const addEffects = true;
   const addTransitions = true;
@@ -191,6 +196,7 @@ export async function POST(request: Request) {
     duration_seconds,
     duration_auto: false,
     add_subtitles: addSubtitles,
+    subtitle_style: addSubtitles ? subtitle_style : null,
     add_music: addMusic,
     add_effects: addEffects,
     add_transitions: addTransitions,

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -30,13 +31,7 @@ export default function ForgotPasswordPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <Link
-        href="/"
-        className="mb-10 font-[family-name:var(--font-syne)] text-xl"
-        style={{ fontWeight: 800 }}
-      >
-        OrzuAi
-      </Link>
+      <BrandLogo href="/" size={32} className="mb-10" />
       <div className="panel rise p-7">
         <h1 className="text-2xl font-semibold">Forgot password</h1>
         <p className="mt-2 text-sm text-[color:var(--muted)]">

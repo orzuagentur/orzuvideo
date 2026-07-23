@@ -115,7 +115,10 @@ export function renderEmailShell(opts: ShellOpts): string {
         <table role="presentation" width="100%" style="max-width:560px;background:#14161c;border:1px solid rgba(242,239,232,0.12);border-radius:16px;overflow:hidden;">
           <tr>
             <td style="padding:28px 28px 8px;">
-              <div style="font-family:Syne,Arial,sans-serif;font-weight:800;font-size:22px;letter-spacing:0.02em;color:#f2efe8;">OrzuAi</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <img src="https://www.orzuai.com/logo-mark.png" width="36" height="36" alt="OrzuAi" style="display:block;border:0;" />
+                <div style="font-family:Syne,Arial,sans-serif;font-weight:800;font-size:22px;letter-spacing:0.02em;color:#f2efe8;">OrzuAi</div>
+              </div>
             </td>
           </tr>
           <tr>

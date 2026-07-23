@@ -39,7 +39,6 @@ export async function updateSession(request: NextRequest) {
   const isVerifyPage = path.startsWith("/login/verify");
   const isProtected =
     path.startsWith("/dashboard") || path.startsWith("/training");
-  const isAuthCallback = path.startsWith("/auth/callback");
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
@@ -53,37 +52,36 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && isAuthPage && !isVerifyPage) {
-    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
-    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
-    if (otpOk === "1" && otpUid === user.id) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
-      return NextResponse.redirect(url);
-    }
+  const otpOk = request.cookies.get("orzu_otp_ok")?.value;
+  const otpUid = request.cookies.get("orzu_otp_uid")?.value;
+  const otpPurpose = request.cookies.get("orzu_otp_purpose")?.value;
+  /** Email OTP is required only for signup (explicit purpose cookie) */
+  const otpPending = Boolean(
+    user &&
+      otpOk === "0" &&
+      otpUid === user.id &&
+      otpPurpose === "signup",
+  );
+
+  if (user && otpPending && isProtected) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/login/verify";
+    url.searchParams.set("mode", "signup");
+    return NextResponse.redirect(url);
   }
 
-  if (user && isProtected) {
-    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
-    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
-    if (!(otpOk === "1" && otpUid === user.id)) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/login/verify";
-      return NextResponse.redirect(url);
-    }
+  if (user && isVerifyPage && !otpPending) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
   }
 
-  if (user && isVerifyPage) {
-    const otpOk = request.cookies.get("orzu_otp_ok")?.value;
-    const otpUid = request.cookies.get("orzu_otp_uid")?.value;
-    if (otpOk === "1" && otpUid === user.id) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
-      return NextResponse.redirect(url);
-    }
+  if (user && isAuthPage && !isVerifyPage && !otpPending) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/dashboard";
+    return NextResponse.redirect(url);
   }
 
-  void isAuthCallback;
   return supabaseResponse;
 }
 

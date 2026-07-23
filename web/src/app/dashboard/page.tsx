@@ -1,5 +1,5 @@
-import { HomeStudio } from "@/components/HomeStudio";
+import { ChannelStudioPage } from "@/components/ChannelStudioPage";
 
 export default function DashboardHomePage() {
-  return <HomeStudio />;
+  return <ChannelStudioPage />;
 }

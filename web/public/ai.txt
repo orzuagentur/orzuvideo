@@ -1,0 +1,15 @@
+# OrzuAi — AI crawler hints
+# https://www.orzuai.com
+
+User-Agent: *
+Allow: /
+Allow: /about
+Allow: /privacy
+Allow: /terms
+Allow: /signup
+Allow: /login
+Disallow: /dashboard
+Disallow: /api/
+Disallow: /auth/
+
+Sitemap: https://www.orzuai.com/sitemap.xml

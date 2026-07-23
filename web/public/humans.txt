@@ -1,0 +1,10 @@
+/* TEAM */
+Developer: OrzuAi
+Contact: support@orzuai.com
+Site: https://www.orzuai.com
+
+/* SITE */
+Standards: HTML5, CSS3, Next.js
+Language: English
+Doctype: HTML5
+Components: React, Supabase, YouTube API

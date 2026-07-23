@@ -51,3 +51,31 @@ export async function getFreshYoutubeAccessToken(userId: string) {
   if (!accessToken) throw new Error("YouTube session expired");
   return { accessToken, channelId: profile.youtube_channel_id as string | null, supabase };
 }
+
+/** Connected channel with a working OAuth token, or unauthorized / disconnected. */
+export async function getYoutubeAuthStatus(
+  userId: string,
+): Promise<"ok" | "unauthorized" | "disconnected"> {
+  const supabase = await createClient();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select(
+      "youtube_connected, youtube_channel_id, youtube_access_token, youtube_refresh_token",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!profile?.youtube_connected && !profile?.youtube_channel_id) {
+    return "disconnected";
+  }
+  if (!profile.youtube_refresh_token && !profile.youtube_access_token) {
+    return "unauthorized";
+  }
+
+  try {
+    await getFreshYoutubeAccessToken(userId);
+    return "ok";
+  } catch {
+    return "unauthorized";
+  }
+}

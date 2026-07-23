@@ -6,6 +6,8 @@ import {
   sendTransactionalEmail,
 } from "@/lib/email/send";
 import { buildPasswordResetSuccessEmail } from "@/lib/email/templates";
+import { passwordValidationError } from "@/lib/password";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -22,10 +24,21 @@ export async function POST(request: Request) {
   if (!token) {
     return NextResponse.json({ error: "Missing token" }, { status: 400 });
   }
-  if (password.length < 6) {
+  const pwErr = passwordValidationError(password);
+  if (pwErr) {
+    return NextResponse.json({ error: pwErr }, { status: 400 });
+  }
+
+  const limited = checkRateLimit(`reset:${getClientIp(request)}`, {
+    maxHits: 10,
+  });
+  if (!limited.ok) {
     return NextResponse.json(
-      { error: "Password must be at least 6 characters" },
-      { status: 400 },
+      { error: limited.error, retryAfterSec: limited.retryAfterSec },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
     );
   }
 

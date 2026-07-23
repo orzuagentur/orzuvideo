@@ -61,20 +61,26 @@ export async function GET(request: Request) {
       null,
   });
 
+  const secure = process.env.NODE_ENV === "production";
   const res = NextResponse.redirect(new URL(next, url.origin));
   res.cookies.set("orzu_otp_ok", "1", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
   });
   res.cookies.set("orzu_otp_uid", user.id, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure,
     path: "/",
     maxAge: 60 * 60 * 24 * 30,
+  });
+  res.cookies.set("orzu_otp_purpose", "", {
+    httpOnly: true,
+    path: "/",
+    maxAge: 0,
   });
   return res;
 }

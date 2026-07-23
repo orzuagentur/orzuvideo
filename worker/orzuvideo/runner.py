@@ -142,6 +142,8 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
     add_effects = True
     add_transitions = True
     use_voice = bool(meta0.get("use_voice", True))
+    add_subtitles = bool(meta0.get("add_subtitles", True))
+    subtitle_style = str(meta0.get("subtitle_style") or "classic").strip() or "classic"
     voice_id = str(meta0.get("voice_id") or settings.elevenlabs_voice_id or "").strip()
     music_track_id = str(meta0.get("music_track_id") or "").strip() or None
     music_group = str(meta0.get("music_group") or "").strip() or None
@@ -168,8 +170,8 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
 
     print(
         f"[CLIPPING] job={job_id} sources={len(sources)} aspect={aspect} "
-        f"target={target_dur}s voice={use_voice} music={add_music} "
-        f"track={music_track_id} group={music_group}"
+        f"target={target_dur}s voice={use_voice} subs={add_subtitles}/{subtitle_style} "
+        f"music={add_music} track={music_track_id} group={music_group}"
     )
 
     db.update_job(
@@ -258,7 +260,14 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
             use_transitions=add_transitions,
         )
 
+    # Strict output length — never longer than the chosen duration
+    exact = work / "combined_exact.mp4"
+    clip_pipe.force_duration(combined, exact, seconds=target_dur)
+    combined = exact
     clip_len = ffprobe_duration(combined)
+    # Prefer the user-selected target when probe is slightly off
+    if abs(clip_len - target_dur) <= 0.4:
+        clip_len = float(target_dur)
     title = titles[0] if len(titles) == 1 else (titles[0] if titles else "AI Mix Clip")
     if len(titles) > 1:
         title = "AI Mix Clip"
@@ -358,7 +367,7 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
 
     final = work / "clip_final.mp4"
     want_subs = False
-    if use_voice:
+    if add_subtitles:
         try:
             words_for_subs = tts_words
             if not words_for_subs:
@@ -379,6 +388,7 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
                     final,
                     work_dir=work,
                     size=(out_w, out_h),
+                    style_id=subtitle_style,
                 )
                 want_subs = True
             else:
@@ -414,6 +424,7 @@ def _process_clipping_job(job: dict, *, sb, work: Path) -> None:
         "source_url": None,
         "source_storage_path": None,
         "add_subtitles": want_subs,
+        "subtitle_style": subtitle_style if want_subs else None,
         "add_music": bool(music_path),
         "add_effects": True,
         "add_transitions": True,

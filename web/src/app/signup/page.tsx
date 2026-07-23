@@ -4,6 +4,9 @@ import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { BrandLogo } from "@/components/BrandLogo";
+import { PasswordStrengthMeter } from "@/components/PasswordStrengthMeter";
+import { isPasswordValid, PASSWORD_MIN_LENGTH } from "@/lib/password";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -17,6 +20,14 @@ export default function SignupPage() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+
+    if (!isPasswordValid(password)) {
+      setLoading(false);
+      setError(
+        `Use at least ${PASSWORD_MIN_LENGTH} characters with a letter, number, and symbol.`,
+      );
+      return;
+    }
 
     const res = await fetch("/api/auth/register", {
       method: "POST",
@@ -57,13 +68,7 @@ export default function SignupPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <Link
-        href="/"
-        className="mb-10 font-[family-name:var(--font-syne)] text-xl"
-        style={{ fontWeight: 800 }}
-      >
-        OrzuAi
-      </Link>
+      <BrandLogo href="/" size={32} className="mb-10" />
       <div className="panel rise p-7">
         <h1 className="text-2xl font-semibold">Create account</h1>
         <p className="mt-2 text-sm text-[color:var(--muted)]">
@@ -96,18 +101,24 @@ export default function SignupPage() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
           />
-          <input
-            className="field"
-            type="password"
-            required
-            minLength={6}
-            placeholder="Password (min 6)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="new-password"
-          />
+          <div className="space-y-2">
+            <input
+              className="field"
+              type="password"
+              required
+              minLength={PASSWORD_MIN_LENGTH}
+              placeholder={`Password (min ${PASSWORD_MIN_LENGTH})`}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+            <PasswordStrengthMeter password={password} />
+          </div>
           {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
-          <button className="btn btn-primary w-full" disabled={loading}>
+          <button
+            className="btn btn-primary w-full"
+            disabled={loading || !isPasswordValid(password)}
+          >
             {loading ? "Creating…" : "Sign up"}
           </button>
         </form>

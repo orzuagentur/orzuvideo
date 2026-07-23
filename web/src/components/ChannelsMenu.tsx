@@ -76,7 +76,7 @@ export function ChannelsMenu({
       return;
     }
     onClose();
-    router.push("/dashboard/channel");
+    router.push("/dashboard");
     router.refresh();
   }
 

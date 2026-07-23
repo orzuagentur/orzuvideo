@@ -1,5 +1,5 @@
 /* OrzuAi PWA service worker — cache shell for offline installability */
-const CACHE = "orzuai-shell-v1";
+const CACHE = "orzuai-shell-v2";
 const PRECACHE = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

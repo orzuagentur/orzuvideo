@@ -1,9 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
+import { PasswordStrengthMeter } from "@/components/PasswordStrengthMeter";
+import { isPasswordValid, PASSWORD_MIN_LENGTH } from "@/lib/password";
 
 function ResetForm() {
   const router = useRouter();
@@ -21,8 +22,10 @@ function ResetForm() {
       setError("Passwords do not match");
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
+    if (!isPasswordValid(password)) {
+      setError(
+        `Use at least ${PASSWORD_MIN_LENGTH} characters with a letter, number, and symbol.`,
+      );
       return;
     }
     if (!token) {
@@ -52,28 +55,34 @@ function ResetForm() {
         Enter and confirm your new password, then you’ll return to log in.
       </p>
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
+        <div className="space-y-2">
+          <input
+            className="field"
+            type="password"
+            required
+            minLength={PASSWORD_MIN_LENGTH}
+            placeholder={`New password (min ${PASSWORD_MIN_LENGTH})`}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+          <PasswordStrengthMeter password={password} />
+        </div>
         <input
           className="field"
           type="password"
           required
-          minLength={6}
-          placeholder="New password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete="new-password"
-        />
-        <input
-          className="field"
-          type="password"
-          required
-          minLength={6}
+          minLength={PASSWORD_MIN_LENGTH}
           placeholder="Confirm password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           autoComplete="new-password"
         />
         {error && <p className="text-sm text-[color:var(--danger)]">{error}</p>}
-        <button className="btn btn-primary w-full" disabled={loading}>
+        <button
+          className="btn btn-primary w-full"
+          disabled={loading || !isPasswordValid(password)}
+        >
           {loading ? "Saving…" : "Save password"}
         </button>
       </form>
@@ -84,14 +93,14 @@ function ResetForm() {
 export default function ResetPasswordPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <Link
-        href="/"
-        className="mb-10 font-[family-name:var(--font-syne)] text-xl"
-        style={{ fontWeight: 800 }}
+      <BrandLogo href="/" size={32} className="mb-10" />
+      <Suspense
+        fallback={
+          <div className="panel p-7 text-sm text-[color:var(--muted)]">
+            Loading…
+          </div>
+        }
       >
-        OrzuAi
-      </Link>
-      <Suspense fallback={<div className="panel p-7 text-sm text-[color:var(--muted)]">Loading…</div>}>
         <ResetForm />
       </Suspense>
     </main>

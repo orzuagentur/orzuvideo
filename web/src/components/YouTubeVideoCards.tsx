@@ -77,52 +77,7 @@ export function YouTubeVideoCards({
     setLiveJobs(jobs);
   }, [jobs]);
 
-  useEffect(() => {
-    const published = jobs.filter((j) => j.youtube_video_id && j.status === "published");
-    if (published.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/youtube/video-stats", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jobIds: published.map((j) => j.id) }),
-        });
-        const data = await res.json();
-        if (!res.ok || cancelled || !Array.isArray(data.items)) return;
-        setLiveJobs((prev) =>
-          prev.map((j) => {
-            const hit = data.items.find(
-              (i: { id: string }) => i.id === j.id,
-            ) as
-              | {
-                  id: string;
-                  view_count: number;
-                  like_count: number;
-                  comment_count: number;
-                  thumbnail_url?: string | null;
-                  title?: string;
-                }
-              | undefined;
-            if (!hit) return j;
-            return {
-              ...j,
-              view_count: hit.view_count,
-              like_count: hit.like_count,
-              comment_count: hit.comment_count,
-              thumbnail_url: hit.thumbnail_url || j.thumbnail_url,
-              title: hit.title || j.title,
-            };
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [jobs]);
+  // Engagement counts come from DB / 24h channel sync — no per-mount YouTube API.
 
   if (liveJobs.length === 0) {
     return (

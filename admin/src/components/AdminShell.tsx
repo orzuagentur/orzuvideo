@@ -33,10 +33,24 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <div className="relative flex h-[5.75rem] items-center justify-between px-4 md:h-[6.25rem] md:px-6">
             <Link
               href="/users"
-              className="relative z-10 inline-block shrink-0 origin-left font-[family-name:var(--font-syne)] text-[1.7rem] tracking-[0.03em] md:text-[2rem]"
-              style={{ fontWeight: 800, transform: "scaleY(1.1)" }}
+              className="relative z-10 inline-flex shrink-0 items-center origin-left"
+              aria-label="OrzuAi Admin"
             >
-              OrzuAi
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo-mark.png"
+                alt=""
+                width={44}
+                height={44}
+                className="h-10 w-10 object-contain md:h-11 md:w-11"
+                draggable={false}
+              />
+              <span
+                className="ml-2.5 font-[family-name:var(--font-syne)] text-[1.55rem] tracking-[0.03em] md:text-[1.75rem]"
+                style={{ fontWeight: 800 }}
+              >
+                OrzuAi
+              </span>
               <span className="ml-2 text-sm font-semibold tracking-wide text-[color:var(--muted)]">
                 Admin
               </span>

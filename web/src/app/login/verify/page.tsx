@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { BrandLogo } from "@/components/BrandLogo";
 
 function VerifyForm() {
   const router = useRouter();
@@ -22,6 +23,27 @@ function VerifyForm() {
       sessionStorage.removeItem("orzu_dev_otp");
     }
   }, []);
+
+  // Login no longer uses OTP — clear any leftover pending cookie and continue
+  useEffect(() => {
+    if (isSignup) return;
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch("/api/auth/session-notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "Email & password login" }),
+      });
+      if (cancelled) return;
+      if (res.ok) {
+        router.replace("/dashboard");
+        router.refresh();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignup, router]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -73,13 +95,14 @@ function VerifyForm() {
   return (
     <div className="panel rise p-7">
       <h1 className="text-2xl font-semibold">
-        {isSignup ? "Verify your account" : "Check your email"}
+        {isSignup ? "Verify your account" : "Signing you in…"}
       </h1>
       <p className="mt-2 text-sm text-[color:var(--muted)]">
         {isSignup
           ? "Enter the 6-digit code we sent to finish creating your account."
-          : "Enter the 6-digit code we sent to finish signing in."}
+          : "Login no longer needs a code. Taking you to the dashboard…"}
       </p>
+      {isSignup ? (
       <form onSubmit={onSubmit} className="mt-6 space-y-4">
         <input
           className="field tracking-[0.35em] text-center text-lg"
@@ -100,13 +123,13 @@ function VerifyForm() {
           className="btn btn-primary w-full"
           disabled={loading || code.length !== 6}
         >
-          {loading
-            ? "Verifying…"
-            : isSignup
-              ? "Confirm & open OrzuAi"
-              : "Confirm & continue"}
+          {loading ? "Verifying…" : "Confirm & open OrzuAi"}
         </button>
       </form>
+      ) : (
+        <p className="mt-6 text-sm text-[color:var(--muted)]">Please wait…</p>
+      )}
+      {isSignup && (
       <div className="mt-5 flex items-center justify-between gap-3 text-sm">
         <button
           type="button"
@@ -121,9 +144,11 @@ function VerifyForm() {
           className="text-[color:var(--muted)]"
           onClick={() => void cancel()}
         >
-          {isSignup ? "Back to sign up" : "Back to login"}
+          Back to sign up
         </button>
       </div>
+      )}
+      {isSignup && (
       <p className="mt-6 text-xs text-[color:var(--muted)]">
         Didn’t get the email? Check spam, or contact{" "}
         <a className="text-[color:var(--accent)]" href="mailto:support@orzuai.com">
@@ -131,6 +156,7 @@ function VerifyForm() {
         </a>
         .
       </p>
+      )}
     </div>
   );
 }
@@ -138,13 +164,7 @@ function VerifyForm() {
 export default function LoginVerifyPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <Link
-        href="/"
-        className="mb-10 font-[family-name:var(--font-syne)] text-xl"
-        style={{ fontWeight: 800 }}
-      >
-        OrzuAi
-      </Link>
+      <BrandLogo href="/" size={32} className="mb-10" />
       <Suspense
         fallback={
           <div className="panel p-7 text-sm text-[color:var(--muted)]">

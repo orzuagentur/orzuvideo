@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SiteChrome } from "@/components/SiteChrome";
+import { BrandLogoWide } from "@/components/BrandLogo";
 
 export const metadata = {
   title: "OrzuAi — AI YouTube Shorts Studio",
@@ -18,12 +19,7 @@ export default function HomePage() {
   return (
     <SiteChrome wide>
       <section className="relative mt-16 flex flex-1 flex-col justify-center sm:mt-20">
-        <p
-          className="font-[family-name:var(--font-syne)] text-5xl leading-[1.05] tracking-tight sm:text-7xl"
-          style={{ fontWeight: 800 }}
-        >
-          OrzuAi
-        </p>
+        <BrandLogoWide width={220} className="max-w-[min(100%,280px)] w-full" />
         <h1 className="mt-5 max-w-2xl text-2xl leading-snug text-[color:var(--fg)] sm:text-3xl">
           Train your AI once. Create and publish YouTube Shorts on autopilot.
         </h1>

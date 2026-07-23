@@ -7,9 +7,12 @@ export type Profile = {
   youtube_channel_title: string | null;
   youtube_thumbnail_url?: string | null;
   youtube_custom_url?: string | null;
+  youtube_banner_url?: string | null;
   youtube_subscriber_count?: number | null;
   youtube_view_count?: number | null;
   youtube_video_count?: number | null;
+  youtube_like_count?: number | null;
+  youtube_comment_count?: number | null;
   youtube_stats_synced_at?: string | null;
   daily_videos_enabled: boolean;
   videos_per_day: number;

@@ -7,6 +7,7 @@ import {
   sendTransactionalEmail,
 } from "@/lib/email/send";
 import { buildPasswordResetEmail } from "@/lib/email/templates";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,19 @@ export async function POST(request: Request) {
     .toLowerCase();
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+  }
+
+  const limited = checkRateLimit(`forgot:${getClientIp(request)}:${email}`, {
+    maxHits: 5,
+  });
+  if (!limited.ok) {
+    return NextResponse.json(
+      { error: limited.error, retryAfterSec: limited.retryAfterSec },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
+    );
   }
 
   // Always return ok to avoid account enumeration

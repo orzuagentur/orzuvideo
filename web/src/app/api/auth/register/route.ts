@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/middleware";
 import { applyOtpPendingCookies, issueLoginOtp } from "@/lib/email/otp";
+import { passwordValidationError } from "@/lib/password";
+import {
+  checkRateLimit,
+  clearRateLimit,
+  getClientIp,
+} from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -25,10 +31,21 @@ export async function POST(request: Request) {
   if (!email.includes("@")) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
   }
-  if (password.length < 6) {
+  const pwErr = passwordValidationError(password);
+  if (pwErr) {
+    return NextResponse.json({ error: pwErr }, { status: 400 });
+  }
+
+  const ip = getClientIp(request);
+  const key = `register:${ip}`;
+  const limited = checkRateLimit(key, { maxHits: 6 });
+  if (!limited.ok) {
     return NextResponse.json(
-      { error: "Password must be at least 6 characters" },
-      { status: 400 },
+      { error: limited.error, retryAfterSec: limited.retryAfterSec },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
     );
   }
 
@@ -77,6 +94,8 @@ export async function POST(request: Request) {
     );
   }
 
+  clearRateLimit(key);
+
   const res = NextResponse.json({
     ok: true,
     needsOtp: true,
@@ -84,6 +103,6 @@ export async function POST(request: Request) {
     skippedEmail: Boolean(issued.skipped),
     ...(issued.code ? { devCode: issued.code } : {}),
   });
-  applyOtpPendingCookies(res, created.user.id);
+  applyOtpPendingCookies(res, created.user.id, "signup");
   return res;
 }

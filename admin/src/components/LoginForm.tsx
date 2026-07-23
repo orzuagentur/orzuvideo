@@ -44,10 +44,21 @@ export function LoginForm() {
         className="w-full max-w-sm space-y-5 rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-8"
       >
         <div>
-          <h1 className="font-[family-name:var(--font-syne)] text-2xl font-bold">
-            OrzuAi Admin
-          </h1>
-          <p className="mt-1 text-sm text-[color:var(--muted)]">
+          <div className="mb-4 flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo-mark.png"
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 object-contain"
+              draggable={false}
+            />
+            <h1 className="font-[family-name:var(--font-syne)] text-2xl font-bold">
+              OrzuAi Admin
+            </h1>
+          </div>
+          <p className="text-sm text-[color:var(--muted)]">
             Sign in with a Supabase account marked as admin.
           </p>
         </div>

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { BrandLogo } from "@/components/BrandLogo";
 
 function LoginForm() {
   const router = useRouter();
@@ -28,32 +29,49 @@ function LoginForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setInfo(null);
 
-    const supabase = createClient();
-    const { error: err } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
     });
+    const data = await res.json().catch(() => ({}));
 
-    if (err) {
+    if (!res.ok) {
       setLoading(false);
-      setError(err.message);
+      if (res.status === 429 && data.retryAfterSec) {
+        setError(
+          `${data.error || "Too many attempts."} Wait ${Math.ceil(data.retryAfterSec / 60)} min.`,
+        );
+      } else {
+        setError(data.error || "Invalid email or password");
+      }
       return;
     }
 
-    const otpRes = await fetch("/api/auth/otp/send", { method: "POST" });
-    const otpData = await otpRes.json().catch(() => ({}));
+    // Mark session trusted + device notify — no OTP on login
+    const notify = await fetch("/api/auth/session-notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "Email & password login" }),
+    });
     setLoading(false);
 
-    if (!otpRes.ok) {
-      setError(otpData.error || "Could not send verification code");
+    if (!notify.ok) {
+      const notifyData = await notify.json().catch(() => ({}));
+      if (notifyData.needsOtp) {
+        router.push("/login/verify?mode=signup");
+        router.refresh();
+        return;
+      }
+      setError(
+        notifyData.error || "Signed in, but session setup failed. Try again.",
+      );
       return;
     }
 
-    if (otpData.devCode) {
-      sessionStorage.setItem("orzu_dev_otp", String(otpData.devCode));
-    }
-    router.push("/login/verify");
+    router.push("/dashboard");
     router.refresh();
   }
 
@@ -143,13 +161,7 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
-      <Link
-        href="/"
-        className="mb-10 font-[family-name:var(--font-syne)] text-xl"
-        style={{ fontWeight: 800 }}
-      >
-        OrzuAi
-      </Link>
+      <BrandLogo href="/" size={32} className="mb-10" />
       <Suspense
         fallback={
           <div className="panel p-7 text-sm text-[color:var(--muted)]">

@@ -7,9 +7,13 @@ export type YtChannelRow = {
   title: string | null;
   custom_url: string | null;
   thumbnail_url: string | null;
+  banner_url?: string | null;
   subscriber_count: number | null;
   view_count: number | null;
   video_count: number | null;
+  like_count?: number | null;
+  comment_count?: number | null;
+  stats_synced_at?: string | null;
   is_active: boolean;
 };
 

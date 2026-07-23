@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>OrzuAi</ShortName>
+  <Description>OrzuAi — AI YouTube Shorts studio</Description>
+  <Image width="32" height="32" type="image/png">https://www.orzuai.com/favicon-32.png</Image>
+  <Url type="text/html" method="get" template="https://www.orzuai.com/signup"/>
+  <Url type="application/opensearchdescription+xml" rel="self" template="https://www.orzuai.com/opensearch.xml"/>
+  <Language>en</Language>
+  <OutputEncoding>UTF-8</OutputEncoding>
+  <InputEncoding>UTF-8</InputEncoding>
+</OpenSearchDescription>

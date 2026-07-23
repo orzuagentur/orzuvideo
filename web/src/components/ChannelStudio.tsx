@@ -35,28 +35,75 @@ export function ChannelStudio({
   initialQueue = [],
   isTrained = false,
   aiContentEnabled = false,
+  youtubeUnauthorized = false,
+  needsAutoSync = false,
 }: {
   profile: Profile | null;
   videos: VideoJob[];
   initialQueue?: VideoJob[];
   isTrained?: boolean;
   aiContentEnabled?: boolean;
+  youtubeUnauthorized?: boolean;
+  /** True when DB cache is older than 24h — one quiet YouTube sync on mount. */
+  needsAutoSync?: boolean;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const { show: toast, notice } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
-  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(
+    profile?.youtube_banner_url || null,
+  );
   const [step, setStep] = useState<PubStep>("closed");
   const [prompt, setPrompt] = useState("");
   const [deviceTitle, setDeviceTitle] = useState("");
   const [queue, setQueue] = useState<VideoJob[]>(initialQueue);
   const [aiOn, setAiOn] = useState(aiContentEnabled);
+  const [unauthorized, setUnauthorized] = useState(youtubeUnauthorized);
+  const [channelStats, setChannelStats] = useState(() => ({
+    subscribers: profile?.youtube_subscriber_count ?? 0,
+    views: profile?.youtube_view_count ?? 0,
+    videos: profile?.youtube_video_count ?? 0,
+    likes:
+      profile?.youtube_like_count ??
+      videos.reduce((s, v) => s + Number(v.like_count || 0), 0),
+    comments:
+      profile?.youtube_comment_count ??
+      videos.reduce((s, v) => s + Number(v.comment_count || 0), 0),
+    title: profile?.youtube_channel_title || null,
+    customUrl: profile?.youtube_custom_url || null,
+    thumbnailUrl: profile?.youtube_thumbnail_url || null,
+  }));
+  const autoSyncDone = useRef(false);
   const pubMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setQueue(initialQueue);
   }, [initialQueue]);
+
+  useEffect(() => {
+    setUnauthorized(youtubeUnauthorized);
+  }, [youtubeUnauthorized]);
+
+  useEffect(() => {
+    setChannelStats({
+      subscribers: profile?.youtube_subscriber_count ?? 0,
+      views: profile?.youtube_view_count ?? 0,
+      videos: profile?.youtube_video_count ?? 0,
+      likes:
+        profile?.youtube_like_count ??
+        videos.reduce((s, v) => s + Number(v.like_count || 0), 0),
+      comments:
+        profile?.youtube_comment_count ??
+        videos.reduce((s, v) => s + Number(v.comment_count || 0), 0),
+      title: profile?.youtube_channel_title || null,
+      customUrl: profile?.youtube_custom_url || null,
+      thumbnailUrl: profile?.youtube_thumbnail_url || null,
+    });
+    if (profile?.youtube_banner_url) {
+      setBannerUrl(profile.youtube_banner_url);
+    }
+  }, [profile, videos]);
 
   useEffect(() => {
     if (step !== "root") return;
@@ -72,25 +119,6 @@ export function ChannelStudio({
   useEffect(() => {
     setAiOn(aiContentEnabled);
   }, [aiContentEnabled]);
-
-  useEffect(() => {
-    if (!profile?.youtube_connected) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/youtube/banner");
-        const data = await res.json();
-        if (!cancelled && res.ok && data.bannerUrl) {
-          setBannerUrl(data.bannerUrl as string);
-        }
-      } catch {
-        /* optional */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [profile?.youtube_connected, profile?.youtube_channel_id]);
 
   const activeJobs = useMemo(
     () => queue.filter((j) => isYoutubeQueueJob(j)),
@@ -128,7 +156,6 @@ export function ChannelStudio({
   }, [activeJobs.length, refreshQueue]);
 
   async function toggleAiContent() {
-    // First time: must configure required training fields
     if (!aiOn && !isTrained) {
       router.push("/dashboard/channel/training?enableAi=1");
       return;
@@ -156,27 +183,106 @@ export function ChannelStudio({
     router.refresh();
   }
 
-  async function sync() {
-    setBusy("sync");
-    const res = await fetch("/api/youtube/stats", { method: "POST" });
-    const data = await res.json();
-    setBusy(null);
-    if (!res.ok) {
-      toast(data.error || "Failed to refresh", "error");
+  const applySyncPayload = useCallback(
+    (data: {
+      bannerUrl?: string | null;
+      channel?: {
+        title?: string | null;
+        customUrl?: string | null;
+        thumbnailUrl?: string | null;
+        subscriberCount?: number;
+        viewCount?: number;
+        videoCount?: number;
+        likeCount?: number;
+        commentCount?: number;
+      };
+    }) => {
+      if (data.bannerUrl) setBannerUrl(String(data.bannerUrl));
+      const ch = data.channel;
+      if (ch) {
+        setChannelStats({
+          subscribers: Number(ch.subscriberCount ?? 0),
+          views: Number(ch.viewCount ?? 0),
+          videos: Number(ch.videoCount ?? 0),
+          likes: Number(ch.likeCount ?? 0),
+          comments: Number(ch.commentCount ?? 0),
+          title: ch.title ?? null,
+          customUrl: ch.customUrl ?? null,
+          thumbnailUrl: ch.thumbnailUrl ?? null,
+        });
+      }
+    },
+    [],
+  );
+
+  const runSync = useCallback(
+    async (force: boolean, quiet = false) => {
+      setBusy("sync");
+      try {
+        const res = await fetch("/api/youtube/stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const msg = String(data.error || "Failed to refresh");
+          if (
+            /token|unauthorized|expired|not connected|refresh failed|session/i.test(
+              msg,
+            ) ||
+            res.status === 401
+          ) {
+            setUnauthorized(true);
+          }
+          if (!quiet) toast(msg, "error");
+          return;
+        }
+
+        setUnauthorized(false);
+        applySyncPayload(data);
+
+        if (!data.cached) {
+          await refreshQueue();
+          router.refresh();
+        }
+
+        if (!quiet) {
+          if (data.cached) {
+            toast("Showing cached channel data (updated within 24h).");
+          } else {
+            const imported = Number(data.imported || 0);
+            const updated = Number(data.updated || 0);
+            toast(
+              imported > 0
+                ? `Fetched ${imported} new videos from YouTube` +
+                  (updated ? `, updated ${updated}.` : ".")
+                : updated > 0
+                  ? `Updated ${updated} videos.`
+                  : "Channel data updated.",
+            );
+          }
+        } else if (!data.cached) {
+          toast("Channel stats refreshed.", "info");
+        }
+      } finally {
+        setBusy(null);
+      }
+    },
+    [applySyncPayload, refreshQueue, router, toast],
+  );
+
+  // Auto-sync once per visit only when DB cache is older than 24h
+  useEffect(() => {
+    if (!needsAutoSync || !profile?.youtube_connected || autoSyncDone.current) {
       return;
     }
-    if (data.bannerUrl) setBannerUrl(data.bannerUrl as string);
-    const imported = Number(data.imported || 0);
-    const updated = Number(data.updated || 0);
-    toast(
-      imported > 0
-        ? `Fetched ${imported} new videos from YouTube` +
-          (updated ? `, updated ${updated}.` : ".")
-        : updated > 0
-          ? `Updated ${updated} videos.`
-          : "Channel data updated.",
-    );
-    router.refresh();
+    autoSyncDone.current = true;
+    void runSync(false, true);
+  }, [needsAutoSync, profile?.youtube_connected, runSync]);
+
+  async function sync() {
+    await runSync(true, false);
   }
 
   async function disconnect() {
@@ -296,9 +402,10 @@ export function ChannelStudio({
   if (!profile?.youtube_connected) {
     return (
       <div className="panel rise space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Channel</h1>
+        <h1 className="text-2xl font-semibold">Home</h1>
         <p className="text-sm text-[color:var(--muted)]">
-          Connect a YouTube channel to publish videos and see stats.
+          Connect a YouTube channel to publish videos and see stats. Use the red
+          YouTube button above to connect or switch channels.
         </p>
         <a href="/api/youtube/connect" className="btn btn-primary inline-flex">
           Connect YouTube
@@ -412,23 +519,81 @@ export function ChannelStudio({
 
       <section className="panel rise relative">
         <CardMenuSlot>
-          <div className="relative flex items-center gap-1.5">
-            <div className="relative" ref={pubMenuRef}>
+          <div className="relative flex flex-col items-end gap-1.5">
+            <div className="relative flex items-center gap-1.5">
+              <div className="relative" ref={pubMenuRef}>
+                <button
+                  type="button"
+                  title="Publications"
+                  aria-label="Publications"
+                  aria-expanded={step === "root"}
+                  onClick={() =>
+                    setStep((s) => (s === "closed" ? "root" : "closed"))
+                  }
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
+                  style={{
+                    boxShadow:
+                      step !== "closed"
+                        ? "0 0 0 2px rgba(232,165,75,0.55)"
+                        : undefined,
+                  }}
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden
+                  >
+                    <path d="M12 3v12" />
+                    <path d="m7 8 5-5 5 5" />
+                    <path d="M5 21h14" />
+                    <path d="M5 17h14" />
+                  </svg>
+                </button>
+
+                {/* Compact chooser under the icon */}
+                {step === "root" && (
+                  <div
+                    className="absolute right-0 top-10 z-30 w-56 overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1.5 shadow-2xl"
+                    role="menu"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
+                      onClick={() => setStep("ai")}
+                    >
+                      <span className="text-sm font-semibold">AI publish</span>
+                      <span className="text-[11px] text-[color:var(--muted)]">
+                        Training niche or your prompt
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
+                      onClick={() => setStep("device")}
+                    >
+                      <span className="text-sm font-semibold">From device</span>
+                      <span className="text-[11px] text-[color:var(--muted)]">
+                        Upload MP4 from phone or PC
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
-                title="Publications"
-                aria-label="Publications"
-                aria-expanded={step === "root"}
-                onClick={() =>
-                  setStep((s) => (s === "closed" ? "root" : "closed"))
-                }
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80"
-                style={{
-                  boxShadow:
-                    step !== "closed"
-                      ? "0 0 0 2px rgba(232,165,75,0.55)"
-                      : undefined,
-                }}
+                title="Refresh"
+                aria-label="Refresh"
+                disabled={busy === "sync"}
+                onClick={() => void sync()}
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80 disabled:opacity-50"
               >
                 <svg
                   width="15"
@@ -436,84 +601,38 @@ export function ChannelStudio({
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="2.2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   aria-hidden
+                  className={busy === "sync" ? "animate-spin" : undefined}
                 >
-                  <path d="M12 3v12" />
-                  <path d="m7 8 5-5 5 5" />
-                  <path d="M5 21h14" />
-                  <path d="M5 17h14" />
+                  <path d="M21 12a9 9 0 1 1-2.6-6.4" />
+                  <path d="M21 3v6h-6" />
                 </svg>
               </button>
-
-              {/* Compact chooser under the icon */}
-              {step === "root" && (
-                <div
-                  className="absolute right-0 top-10 z-30 w-56 overflow-hidden rounded-2xl border border-[color:var(--line)] bg-[color:var(--bg-elevated)] p-1.5 shadow-2xl"
-                  role="menu"
-                >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
-                    onClick={() => setStep("ai")}
-                  >
-                    <span className="text-sm font-semibold">AI publish</span>
-                    <span className="text-[11px] text-[color:var(--muted)]">
-                      Training niche or your prompt
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="flex w-full flex-col rounded-xl px-3 py-2.5 text-left transition hover:bg-white/5"
-                    onClick={() => setStep("device")}
-                  >
-                    <span className="text-sm font-semibold">From device</span>
-                    <span className="text-[11px] text-[color:var(--muted)]">
-                      Upload MP4 from phone or PC
-                    </span>
-                  </button>
-                </div>
-              )}
+              <CardMenu
+                items={[
+                  { label: "+ YouTube channel", href: "/api/youtube/connect" },
+                  {
+                    label:
+                      busy === "disconnect" ? "Disconnecting..." : "Disconnect",
+                    danger: true,
+                    disabled: busy === "disconnect",
+                    onClick: () => void disconnect(),
+                  },
+                ]}
+              />
             </div>
-            <button
-              type="button"
-              title="Refresh"
-              aria-label="Refresh"
-              disabled={busy === "sync"}
-              onClick={() => void sync()}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white backdrop-blur transition hover:bg-black/80 disabled:opacity-50"
-            >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-                className={busy === "sync" ? "animate-spin" : undefined}
+            {unauthorized && (
+              <a
+                href="/api/youtube/connect"
+                className="inline-flex min-w-[9.5rem] items-center justify-center rounded-full px-4 py-1.5 text-xs font-semibold text-white transition hover:brightness-110"
+                style={{ background: "#FF0000" }}
               >
-                <path d="M21 12a9 9 0 1 1-2.6-6.4" />
-                <path d="M21 3v6h-6" />
-              </svg>
-            </button>
-            <CardMenu
-              items={[
-                { label: "+ YouTube channel", href: "/api/youtube/connect" },
-                {
-                  label: busy === "disconnect" ? "Disconnecting..." : "Disconnect",
-                  danger: true,
-                  disabled: busy === "disconnect",
-                  onClick: () => void disconnect(),
-                },
-              ]}
-            />
+                Авторизоваться
+              </a>
+            )}
           </div>
         </CardMenuSlot>
 
@@ -531,10 +650,10 @@ export function ChannelStudio({
 
         <div className="relative -mt-10 space-y-4 px-5 pb-5 sm:px-6">
           <div className="flex flex-wrap items-end gap-4">
-            {profile.youtube_thumbnail_url ? (
+            {channelStats.thumbnailUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={profile.youtube_thumbnail_url}
+                src={channelStats.thumbnailUrl}
                 alt=""
                 className="h-20 w-20 rounded-full border-4 border-[color:var(--bg-elevated)] object-cover"
               />
@@ -544,20 +663,29 @@ export function ChannelStudio({
               </div>
             )}
             <div className="min-w-0 flex-1 pb-1">
-              <h2 className="truncate text-xl font-semibold">
-                {profile.youtube_channel_title || "YouTube channel"}
-              </h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="truncate text-xl font-semibold">
+                  {channelStats.title || "YouTube channel"}
+                </h2>
+                {unauthorized && (
+                  <span className="rounded-md bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-400">
+                    Unauthorized
+                  </span>
+                )}
+              </div>
               <p className="truncate text-sm text-[color:var(--muted)]">
-                {profile.youtube_custom_url || profile.youtube_channel_id}
+                {channelStats.customUrl || profile.youtube_channel_id}
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="grid min-w-0 flex-1 grid-cols-3 gap-3 text-center sm:max-w-md">
-              <Stat label="Subscribers" value={profile.youtube_subscriber_count ?? 0} />
-              <Stat label="Views" value={profile.youtube_view_count ?? 0} />
-              <Stat label="Videos" value={profile.youtube_video_count ?? 0} />
+            <div className="grid min-w-0 flex-1 grid-cols-3 gap-2 text-center sm:max-w-2xl sm:grid-cols-5 sm:gap-3">
+              <Stat label="Subscribers" value={channelStats.subscribers} />
+              <Stat label="Views" value={channelStats.views} />
+              <Stat label="Videos" value={channelStats.videos} />
+              <Stat label="Likes" value={channelStats.likes} />
+              <Stat label="Comments" value={channelStats.comments} />
             </div>
 
             {/* AI Training + AI content toggle */}

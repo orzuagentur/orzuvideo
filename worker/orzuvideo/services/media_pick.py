@@ -109,61 +109,74 @@ def pick_library_track(
     script_mood: str | None = None,
     default_mood: str = "cinematic",
 ) -> dict[str, Any] | None:
-    """Pick best unused track from the shared platform R2 music library."""
-    _ = user_id  # usage tracking stays per-user; catalog is platform-wide
+    """Pick a track: preferred id (user or platform), else user library, else platform."""
     ban = {str(x) for x in (exclude_ids or set())}
     preferred = [str(x) for x in (preferred_ids or []) if x and str(x) not in ban]
+    select_cols = (
+        "id,user_id,title,artist,mood,duration_sec,storage_path,public_url,"
+        "genre_id,is_platform,music_genres(name,slug)"
+    )
+
+    def _allowed(row: dict[str, Any]) -> bool:
+        if bool(row.get("is_platform")):
+            return True
+        return str(row.get("user_id") or "") == str(user_id)
 
     for tid in preferred:
         try:
             hit = (
                 sb.table("music_tracks")
-                .select(
-                    "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
-                )
-                .eq("is_platform", True)
+                .select(select_cols)
                 .eq("id", tid)
                 .limit(1)
                 .execute()
             )
             rows = hit.data or []
-            if rows:
+            if rows and _allowed(rows[0]):
                 return rows[0]
         except Exception as exc:
             print(f"[LIBRARY] preferred id={tid} skip: {exc}")
 
-    try:
-        result = (
-            sb.table("music_tracks")
-            .select(
-                "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
+    def _list(eq_platform: bool | None = None, eq_user: bool = False) -> list[dict]:
+        try:
+            q = (
+                sb.table("music_tracks")
+                .select(select_cols)
+                .order("created_at", desc=True)
+                .limit(200)
             )
-            .eq("is_platform", True)
-            .order("created_at", desc=True)
-            .limit(200)
-            .execute()
-        )
-    except Exception as exc:
-        # Fallback for DBs that have not run migration 021 yet
-        print(f"[LIBRARY] platform list failed ({exc}); trying user library")
+            if eq_user:
+                q = q.eq("user_id", user_id)
+            if eq_platform is True:
+                q = q.eq("is_platform", True)
+            result = q.execute()
+            return [r for r in (result.data or []) if str(r.get("id")) not in ban]
+        except Exception as exc:
+            print(f"[LIBRARY] list failed: {exc}")
+            return []
+
+    rows = _list(eq_user=True)
+    if not rows:
+        rows = _list(eq_platform=True)
+    if not rows:
+        # Legacy DBs without is_platform
         try:
             result = (
                 sb.table("music_tracks")
                 .select(
-                    "id,title,artist,mood,duration_sec,storage_path,public_url,genre_id,music_genres(name,slug)"
+                    "id,user_id,title,artist,mood,duration_sec,storage_path,public_url,"
+                    "genre_id,music_genres(name,slug)"
                 )
                 .eq("user_id", user_id)
                 .order("created_at", desc=True)
                 .limit(200)
                 .execute()
             )
+            rows = [r for r in (result.data or []) if str(r.get("id")) not in ban]
         except Exception as exc2:
-            print(f"[LIBRARY] list failed: {exc2}")
+            print(f"[LIBRARY] legacy list failed: {exc2}")
             return None
 
-    rows = [r for r in (result.data or []) if str(r.get("id")) not in ban]
-    if not rows:
-        rows = list(result.data or [])
     if not rows:
         return None
 

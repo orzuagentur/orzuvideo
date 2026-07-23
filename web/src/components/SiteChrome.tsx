@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 
 /** Public marketing / legal pages — shared chrome. */
 export function SiteChrome({
@@ -24,13 +25,7 @@ export function SiteChrome({
         }`}
       >
         <header className="flex items-center justify-between gap-4">
-          <Link
-            href="/"
-            className="font-[family-name:var(--font-syne)] text-2xl tracking-tight"
-            style={{ fontWeight: 800 }}
-          >
-            OrzuAi
-          </Link>
+          <BrandLogo href="/" size={34} />
           <nav className="flex flex-wrap items-center justify-end gap-2 text-sm">
             <Link
               href="/privacy"

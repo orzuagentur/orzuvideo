@@ -48,7 +48,7 @@ export async function GET(request: Request) {
     )
     .eq("is_platform", true)
     .order("created_at", { ascending: false })
-    .limit(40);
+    .limit(100);
 
   if (genreId) query = query.eq("genre_id", genreId);
   if (q) {

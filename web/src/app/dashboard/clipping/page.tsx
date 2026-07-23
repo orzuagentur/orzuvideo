@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { AIClippingStudio } from "@/components/AIClippingStudio";
 import type { VideoJob } from "@/lib/types";
@@ -26,5 +27,13 @@ export default async function ClippingPage() {
     return src === "ai_clipping" || pipe === "ai_clipping" || src === "clipping";
   });
 
-  return <AIClippingStudio initialJobs={jobs} />;
+  return (
+    <Suspense
+      fallback={
+        <p className="text-sm text-[color:var(--muted)]">Loading…</p>
+      }
+    >
+      <AIClippingStudio initialJobs={jobs} />
+    </Suspense>
+  );
 }

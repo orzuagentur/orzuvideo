@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { CreativityStudio } from "@/components/CreativityStudio";
 import type { VideoJob } from "@/lib/types";
@@ -29,5 +30,13 @@ export default async function CreativityPage() {
     return false;
   });
 
-  return <CreativityStudio initialJobs={list} />;
+  return (
+    <Suspense
+      fallback={
+        <p className="text-sm text-[color:var(--muted)]">Loading…</p>
+      }
+    >
+      <CreativityStudio initialJobs={list} />
+    </Suspense>
+  );
 }
